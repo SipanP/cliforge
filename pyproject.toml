@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cliforge = "cliforge.main:app"
+cliforge = "cliforge.main:main"
 
 [build-system]
 requires = ["hatchling"]

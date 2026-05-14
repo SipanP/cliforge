@@ -6,7 +6,7 @@ import typer
 
 from cliforge.cli.formatting import format_result, print_error
 
-tools_app = typer.Typer(help="Tool discovery and inspection.")
+tools_app = typer.Typer(help="List and inspect registered tools.")
 
 
 @tools_app.callback(invoke_without_command=True)
@@ -40,8 +40,8 @@ def list_tools(
 
 @tools_app.command("inspect")
 def inspect_tool(
-    namespace: str = typer.Argument(..., help="Namespace"),
-    name: str = typer.Argument(..., help="Tool name"),
+    namespace: str = typer.Argument(..., help="Namespace — run 'cliforge connectors list'"),
+    name: str = typer.Argument(..., help="Tool name — run 'cliforge tools' to list all"),
     output: str = typer.Option("json", "--output", "-o", help="Output format"),
 ) -> None:
     """Inspect a tool's full definition."""
@@ -60,8 +60,8 @@ def inspect_tool(
 
 @tools_app.command("schema")
 def show_schema(
-    namespace: str = typer.Argument(..., help="Namespace"),
-    name: str = typer.Argument(..., help="Tool name"),
+    namespace: str = typer.Argument(..., help="Namespace — run 'cliforge connectors list'"),
+    name: str = typer.Argument(..., help="Tool name — run 'cliforge tools' to list all"),
 ) -> None:
     """Show the input schema for a tool as deterministic JSON."""
     from cliforge.registry.store import Registry
