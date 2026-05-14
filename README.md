@@ -1,5 +1,16 @@
 # CliForge
 
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
+[![Tests](https://img.shields.io/badge/tests-61%20passing-brightgreen)](./tests)
+[![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
+[![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
+[![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
+[![MCP](https://img.shields.io/badge/MCP-stdio-8A2BE2)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-261230?logo=ruff)](https://github.com/astral-sh/ruff)
+[![Async](https://img.shields.io/badge/async-anyio-orange)](https://anyio.readthedocs.io/)
+
 A schema-driven runtime that dynamically converts OpenAPI specifications and MCP servers into production-quality CLI tools optimized for both humans and LLM agents.
 
 > Think of it as `kubectl` for arbitrary APIs and AI tools.
@@ -67,26 +78,43 @@ class Tool(BaseModel):
 - Python 3.13+
 - [uv](https://github.com/astral-sh/uv)
 
-### Install
+### Option 1 — Install globally as a tool (recommended)
+
+This makes `cliforge` available on your `$PATH` as a normal command:
+
+```bash
+git clone https://github.com/sipanp/cliforge
+cd cliforge
+uv tool install .
+
+cliforge --help
+```
+
+To update later after pulling changes:
+
+```bash
+uv tool install . --reinstall
+```
+
+### Option 2 — Activate the project venv
 
 ```bash
 git clone https://github.com/sipanp/cliforge
 cd cliforge
 uv sync
+source .venv/bin/activate   # on Windows: .venv\Scripts\activate
+
+cliforge --help
 ```
 
-### Run via uv
+### Option 3 — Run via uv (no install)
 
 ```bash
+uv sync
 uv run cliforge --help
 ```
 
-### Install globally (optional)
-
-```bash
-uv tool install .
-cliforge --help
-```
+> All examples below assume `cliforge` is on your `$PATH` (Option 1 or 2). If you prefer Option 3, prefix every command with `uv run`.
 
 ---
 
@@ -96,39 +124,39 @@ cliforge --help
 
 ```bash
 # From a local YAML/JSON spec
-uv run cliforge add openapi github ./github.yaml
+cliforge add openapi github ./github.yaml
 
 # From a remote URL
-uv run cliforge add openapi petstore https://petstore3.swagger.io/api/v3/openapi.json
+cliforge add openapi petstore https://petstore3.swagger.io/api/v3/openapi.json
 
 # With authentication
-uv run cliforge add openapi github ./github.yaml --token ghp_yourtoken
-uv run cliforge add openapi myapi ./spec.yaml --api-key sk-mykey
+cliforge add openapi github ./github.yaml --token ghp_yourtoken
+cliforge add openapi myapi ./spec.yaml --api-key sk-mykey
 ```
 
 ### Add an MCP connector
 
 ```bash
-uv run cliforge add mcp filesystem "npx @modelcontextprotocol/server-filesystem /tmp"
+cliforge add mcp filesystem "npx @modelcontextprotocol/server-filesystem /tmp"
 ```
 
 ### Discover tools
 
 ```bash
 # List all tools
-uv run cliforge tools
+cliforge tools
 
 # Filter by namespace
-uv run cliforge tools --namespace github
+cliforge tools --namespace github
 
 # Table output
-uv run cliforge tools --output table
+cliforge tools --output table
 ```
 
 ### Inspect a tool
 
 ```bash
-uv run cliforge inspect github listUsers
+cliforge inspect github listUsers
 
 # Output:
 # {
@@ -144,7 +172,7 @@ uv run cliforge inspect github listUsers
 ### Inspect a tool's input schema
 
 ```bash
-uv run cliforge schema github listUsers
+cliforge schema github listUsers
 
 # Output (deterministic JSON):
 # {
@@ -160,13 +188,13 @@ uv run cliforge schema github listUsers
 
 ```bash
 # Dynamic dispatch: cliforge <namespace> <tool-name> [--flags]
-uv run cliforge github listUsers --limit 10
+cliforge github listUsers --limit 10
 
-uv run cliforge github createUser --name "Alice" --email "alice@example.com"
+cliforge github createUser --name "Alice" --email "alice@example.com"
 
-uv run cliforge github getUser --userId "abc123"
+cliforge github getUser --userId "abc123"
 
-uv run cliforge github createIssue --title "Bug report" --body "Details here"
+cliforge github createIssue --title "Bug report" --body "Details here"
 ```
 
 ---
@@ -175,13 +203,13 @@ uv run cliforge github createIssue --title "Bug report" --body "Details here"
 
 ```bash
 # JSON (default) — LLM-compatible, deterministic
-uv run cliforge github listUsers --output json
+cliforge github listUsers --output json
 
 # Rich table
-uv run cliforge github listUsers --output table
+cliforge github listUsers --output table
 
 # Raw (compact JSON, no formatting)
-uv run cliforge github listUsers --output raw
+cliforge github listUsers --output raw
 ```
 
 ---
@@ -190,15 +218,15 @@ uv run cliforge github listUsers --output raw
 
 ```bash
 # List registered connectors
-uv run cliforge connectors list
+cliforge connectors list
 
 # Re-discover tools for a connector (after spec update)
-uv run cliforge refresh github
+cliforge refresh github
 # or
-uv run cliforge connectors refresh github
+cliforge connectors refresh github
 
 # Remove a connector and its cached tools
-uv run cliforge connectors remove github
+cliforge connectors remove github
 ```
 
 ---
@@ -210,13 +238,13 @@ CliForge supports three authentication strategies:
 ### Bearer Token (via flag)
 
 ```bash
-uv run cliforge add openapi github ./spec.yaml --token ghp_yourtoken
+cliforge add openapi github ./spec.yaml --token ghp_yourtoken
 ```
 
 ### API Key (via flag)
 
 ```bash
-uv run cliforge add openapi myapi ./spec.yaml --api-key sk-mykey
+cliforge add openapi myapi ./spec.yaml --api-key sk-mykey
 ```
 
 ### Environment Variables
@@ -225,7 +253,7 @@ CliForge automatically reads from environment variables following the pattern `{
 
 ```bash
 export GITHUB_TOKEN=ghp_yourtoken
-uv run cliforge add openapi github ./spec.yaml
+cliforge add openapi github ./spec.yaml
 ```
 
 Credentials are stored securely in `~/.cliforge/credentials.json` (permissions: `600`).
