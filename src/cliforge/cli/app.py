@@ -7,10 +7,11 @@ import sys
 from typing import Any
 
 import typer
+from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
-from rich import box
 
 from cliforge.cli.commands.add import add_app
 from cliforge.cli.commands.connectors import connectors_app
@@ -76,8 +77,77 @@ def _print_namespace_panel() -> None:
     console.print(panel)
     console.print(
         "  [dim]List tools:[/dim]  [bold]cliforge tools[/bold]"
-        "   [dim]Get schema:[/dim]  [bold]cliforge schema [cyan]<namespace>[/cyan] [green]<tool>[/green][/bold]\n"
+        "   [dim]Tool help:[/dim]  [bold]cliforge [cyan]<namespace>[/cyan] [green]<tool>[/green] [yellow]--help[/yellow][/bold]\n"
     )
+
+
+def _print_tool_help(namespace: str, tool_name: str) -> None:
+    """Render --help for a dynamic tool: description, parameters, usage example."""
+    from cliforge.registry.store import Registry
+    from cliforge.schema.inspection import schema_to_cli_params
+
+    registry = Registry()
+    registry.load()
+    tool = registry.get_tool_by_name(namespace, tool_name)
+    if not tool:
+        from cliforge.cli.formatting import print_error
+        print_error(f"Tool '{tool_name}' not found in namespace '{namespace}'.")
+        sys.exit(1)
+
+    # Header
+    console.print()
+    console.print(f"[bold cyan]{namespace}[/bold cyan] [bold white]{tool.name}[/bold white]")
+    if tool.description:
+        console.print(f"  {escape(tool.description)}\n")
+    else:
+        console.print()
+
+    # Execution details
+    ex = tool.execution
+    if ex.type == "openapi":
+        console.print(f"  [dim]Type:[/dim]  openapi   [dim]Method:[/dim]  [yellow]{ex.method}[/yellow]   [dim]Path:[/dim]  [white]{ex.path}[/white]")  # type: ignore[union-attr]
+        console.print(f"  [dim]Base:[/dim]  {ex.base_url}\n")  # type: ignore[union-attr]
+    elif ex.type == "mcp":
+        console.print(f"  [dim]Type:[/dim]  mcp   [dim]Server:[/dim]  {ex.server}\n")  # type: ignore[union-attr]
+
+    # Parameters table
+    params = schema_to_cli_params(tool.input_schema)
+    if params:
+        table = Table(box=box.SIMPLE_HEAD, show_header=True, padding=(0, 1))
+        table.add_column("Flag", style="yellow", no_wrap=True)
+        table.add_column("Type", style="cyan")
+        table.add_column("Required", style="red")
+        table.add_column("Location", style="dim")
+        table.add_column("Description")
+
+        for p in params:
+            flag = f"--{p['name']}"
+            req = "yes" if p["required"] else ""
+            loc = p.get("location", "query")
+            desc = escape(p.get("description") or "")
+            if p.get("enum"):
+                desc += f"  [dim]({', '.join(str(e) for e in p['enum'])})[/dim]"
+            table.add_row(flag, p["type"], req, loc, desc)
+
+        console.print(Panel(table, title="[bold]Parameters[/bold]", border_style="dim"))
+    else:
+        console.print("  [dim]No parameters.[/dim]\n")
+
+    # Usage example
+    required_params = [p for p in params if p["required"]]
+    example_parts = [f"cliforge {namespace} {tool_name}"]
+    for p in required_params[:3]:
+        example_val = _example_value(p["type"])
+        example_parts.append(f"--{p['name']} {example_val}")
+    if len(required_params) > 3:
+        example_parts.append("...")
+    console.print(f"  [dim]Example:[/dim]  [bold]{escape(' '.join(example_parts))}[/bold]")
+    console.print(f"  [dim]Schema: [/dim]  [bold]cliforge schema {namespace} {tool_name}[/bold]\n")
+
+
+def _example_value(json_type: str) -> str:
+    return {"string": '"value"', "integer": "42", "number": "3.14",
+            "boolean": "true", "array": '"[...]"', "object": '"{...}"'}.get(json_type, '"value"')
 
 
 @app.command("inspect")
@@ -115,9 +185,8 @@ def namespaces_cmd(
     output: str = typer.Option("table", "--output", "-o", help="Output format: json, table, raw"),
 ) -> None:
     """List registered namespaces and their tool counts."""
-    import json
-    from cliforge.registry.store import Registry
     from cliforge.cli.formatting import format_result
+    from cliforge.registry.store import Registry
 
     registry = Registry()
     registry.load()
@@ -148,22 +217,9 @@ def handle_dynamic_dispatch(args: list[str]) -> bool:
     registry = Registry()
     registry.load()
 
-    # If just the namespace is given (no tool name), list tools in that namespace
+    # `cliforge <namespace>` — list tools in that namespace
     if len(args) == 1 and registry.has_connector(namespace):
-        tools = registry.get_tools(namespace)
-        if tools:
-            console.print(f"\n[bold cyan]{namespace}[/bold cyan] — {len(tools)} tool(s)\n")
-            for t in tools:
-                desc = (t.description or "")[:72]
-                console.print(f"  [bold]{t.name}[/bold]  [dim]{desc}[/dim]")
-            console.print(
-                f"\n  [dim]Run:[/dim]  "
-                f"[bold]cliforge {namespace} [green]<tool>[/green] [yellow][--flags][/yellow][/bold]"
-                f"  [dim]  Schema:[/dim]  "
-                f"[bold]cliforge schema {namespace} [green]<tool>[/green][/bold]\n"
-            )
-        else:
-            console.print(f"[yellow]No tools cached for namespace '{namespace}'. Run:[/yellow] cliforge refresh {namespace}")
+        _print_namespace_tools(registry, namespace)
         return True
 
     if len(args) < 2:
@@ -172,10 +228,15 @@ def handle_dynamic_dispatch(args: list[str]) -> bool:
     tool_name = args[1]
     raw_args = args[2:]
 
+    # `cliforge <namespace> <tool> --help` — show tool help
+    if "--help" in raw_args or "-h" in raw_args:
+        if registry.has_connector(namespace):
+            _print_tool_help(namespace, tool_name)
+            return True
+
     tool = registry.get_tool_by_name(namespace, tool_name)
     if tool is None:
         if registry.has_connector(namespace):
-            # Namespace exists but tool not found — give a helpful error
             from cliforge.cli.formatting import print_error
             print_error(f"Tool '{tool_name}' not found in namespace '{namespace}'.")
             console.print(f"  Run [bold]cliforge tools --namespace {namespace}[/bold] to list available tools.\n")
@@ -204,10 +265,39 @@ def handle_dynamic_dispatch(args: list[str]) -> bool:
     return True
 
 
+def _print_namespace_tools(registry: Any, namespace: str) -> None:
+    """List all tools in a namespace with a one-line description each."""
+    tools = registry.get_tools(namespace)
+    if not tools:
+        console.print(
+            f"[yellow]No tools cached for '{namespace}'. Run:[/yellow] "
+            f"[bold]cliforge refresh {namespace}[/bold]"
+        )
+        return
+
+    console.print(f"\n[bold cyan]{namespace}[/bold cyan] — {len(tools)} tool(s)\n")
+
+    table = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
+    table.add_column("name", style="bold white", no_wrap=True)
+    table.add_column("desc", style="dim")
+
+    for t in tools:
+        # escape so Rich doesn't interpret brackets in descriptions as markup
+        desc = escape((t.description or "").split("\n")[0][:80])
+        table.add_row(t.name, desc)
+
+    console.print(table)
+    console.print(
+        f"  [dim]Run:[/dim]    [bold]cliforge {namespace} [green]<tool>[/green] [yellow][--flags][/yellow][/bold]\n"
+        f"  [dim]Help:[/dim]   [bold]cliforge {namespace} [green]<tool>[/green] [yellow]--help[/yellow][/bold]\n"
+        f"  [dim]Schema:[/dim] [bold]cliforge schema {namespace} [green]<tool>[/green][/bold]\n"
+    )
+
+
 def _build_connector(config: Any, namespace: str, tool: Any) -> Any:
     if config.type == "openapi":
-        from cliforge.connectors.openapi import OpenApiConnector
         from cliforge.auth.storage import CredentialStorage
+        from cliforge.connectors.openapi import OpenApiConnector
         from cliforge.registry.store import Registry
 
         registry = Registry()

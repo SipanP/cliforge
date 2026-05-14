@@ -12,13 +12,29 @@ logger = logging.getLogger(__name__)
 
 
 def _detect_base_url(spec: dict[str, Any], source: str) -> str:
+    from urllib.parse import urlparse
+
     servers: list[dict[str, Any]] = spec.get("servers", [])
     if servers:
-        return servers[0].get("url", "").rstrip("/")
+        url = servers[0].get("url", "").rstrip("/")
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        # Relative server path (e.g. "/api/v3") — resolve against the source origin
+        if url and (source.startswith("http://") or source.startswith("https://")):
+            parsed = urlparse(source)
+            return f"{parsed.scheme}://{parsed.netloc}{url}"
+        # Relative with no resolvable origin — warn and fall through
+        if url:
+            logger.warning(
+                "Server URL '%s' is relative and source is a local file. "
+                "Use --base-url to set an explicit base URL.",
+                url,
+            )
+
     if source.startswith("http://") or source.startswith("https://"):
-        from urllib.parse import urlparse
         parsed = urlparse(source)
         return f"{parsed.scheme}://{parsed.netloc}"
+
     return "http://localhost"
 
 
