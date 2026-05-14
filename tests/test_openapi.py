@@ -251,3 +251,43 @@ async def test_connector_execute_unknown_tool(example_spec_path):
 
     with pytest.raises(KeyError):
         await connector.execute("test.nonexistent", {})
+
+
+# --- Base URL detection tests ---
+
+def test_detect_base_url_absolute_server():
+    from cliforge.connectors.openapi.connector import _detect_base_url
+    spec = {"servers": [{"url": "https://api.example.com/v1"}]}
+    assert _detect_base_url(spec, "local.yaml") == "https://api.example.com/v1"
+
+
+def test_detect_base_url_relative_server_with_remote_source():
+    from cliforge.connectors.openapi.connector import _detect_base_url
+    spec = {"servers": [{"url": "/api/v3"}]}
+    result = _detect_base_url(spec, "https://petstore3.swagger.io/api/v3/openapi.json")
+    assert result == "https://petstore3.swagger.io/api/v3"
+
+
+def test_detect_base_url_no_servers_remote_source():
+    from cliforge.connectors.openapi.connector import _detect_base_url
+    spec = {}
+    result = _detect_base_url(spec, "https://api.example.com/openapi.yaml")
+    assert result == "https://api.example.com"
+
+
+def test_detect_base_url_no_servers_local_source():
+    from cliforge.connectors.openapi.connector import _detect_base_url
+    spec = {}
+    result = _detect_base_url(spec, "./local.yaml")
+    assert result == "http://localhost"
+
+
+def test_detect_base_url_relative_server_local_source_warns(caplog):
+    import logging
+    from cliforge.connectors.openapi.connector import _detect_base_url
+    spec = {"servers": [{"url": "/api/v3"}]}
+    with caplog.at_level(logging.WARNING, logger="cliforge.connectors.openapi.connector"):
+        result = _detect_base_url(spec, "./local.yaml")
+    assert "relative" in caplog.text.lower()
+    # Falls through to localhost since there's no origin to resolve against
+    assert result == "http://localhost"
