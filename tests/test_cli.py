@@ -316,6 +316,106 @@ def test_format_execution_result_error_shows_status_and_message():
     assert out_buf.getvalue().strip() == ""
 
 
+def test_coerce_array_json_syntax():
+    """_coerce_value parses a proper JSON array string."""
+    from cliforge.cli.dynamic import _coerce_value
+    result = _coerce_value('["https://example.com/a.jpg", "b.jpg"]', "array")
+    assert result == ["https://example.com/a.jpg", "b.jpg"]
+
+
+def test_coerce_array_bare_string():
+    """_coerce_value wraps a bare string as a single-element array."""
+    from cliforge.cli.dynamic import _coerce_value
+    result = _coerce_value("https://example.com/pic.jpg", "array")
+    assert result == ["https://example.com/pic.jpg"]
+
+
+def test_coerce_array_comma_separated():
+    """_coerce_value splits comma-separated values into an array."""
+    from cliforge.cli.dynamic import _coerce_value
+    result = _coerce_value("foo,bar,baz", "array")
+    assert result == ["foo", "bar", "baz"]
+
+
+def test_coerce_array_single_quoted_falls_back():
+    """_coerce_value treats single-quoted Python-style lists as bare strings (no crash)."""
+    from cliforge.cli.dynamic import _coerce_value
+    # Single-quoted JSON is invalid; should not raise
+    result = _coerce_value("['url']", "array")
+    assert isinstance(result, list)
+    assert len(result) == 1
+
+
+def test_preflight_exit_produces_no_spurious_error_line():
+    """A pre-flight validation failure must not print a bare 'Error:' line via main()."""
+    import io, sys
+    from unittest.mock import patch as _patch
+    from cliforge.models.tool import Tool, OpenApiExecution
+    from cliforge.registry.store import Registry
+
+    tool = Tool(
+        id="t.createUser",
+        namespace="t",
+        name="createUser",
+        input_schema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string", "x-param-in": "body"}},
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com/v1", path="/users", method="POST"
+        ),
+    )
+
+    # Patch handle_dynamic_dispatch to simulate the pre-flight Exit being raised.
+    import click
+    def _fake_dispatch(args):
+        raise click.exceptions.Exit(code=1)
+
+    stderr_buf = io.StringIO()
+    with _patch("cliforge.main.handle_dynamic_dispatch", _fake_dispatch):
+        with _patch("sys.argv", ["cliforge", "t", "createUser"]):
+            with pytest.raises(SystemExit) as exc_info:
+                with _patch("sys.stderr", stderr_buf):
+                    from cliforge.main import main
+                    main()
+    assert exc_info.value.code == 1
+    # The generic "Error: " line must NOT appear
+    assert stderr_buf.getvalue().strip() == ""
+
+
+def test_unknown_arg_shows_helpful_error(tmp_path):
+    """An unrecognised first arg that is not a namespace shows a clear error, not typer's generic one."""
+    import io
+    from unittest.mock import patch as _patch
+    registry_dir = tmp_path / ".cliforge"
+    stderr_buf = io.StringIO()
+    with _patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        with _patch("sys.argv", ["cliforge", "badns", "badtool"]):
+            with pytest.raises(SystemExit) as exc_info:
+                with _patch("sys.stderr", stderr_buf):
+                    from cliforge.main import main
+                    main()
+    assert exc_info.value.code == 1
+    err = stderr_buf.getvalue()
+    assert "badns" in err
+    assert "namespace" in err.lower() or "command" in err.lower()
+    # Must NOT fall through to typer's generic "No such command" message
+    assert "No such command" not in err
+
+
+def test_schema_strips_x_param_in(tmp_path, example_spec_path):
+    """cliforge schema output must not contain x-param-in internal metadata."""
+    registry_dir = tmp_path / ".cliforge"
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        result = runner.invoke(app, ["schema", "myapi", "getUser"])
+    assert result.exit_code == 0
+    schema = json.loads(result.output)
+    for prop in schema.get("properties", {}).values():
+        assert "x-param-in" not in prop
+
+
 def test_root_help_shows_direct_execution_hint(tmp_path, example_spec_path):
     """Root help output explains direct namespace execution when connectors are registered."""
     registry_dir = tmp_path / ".cliforge"
