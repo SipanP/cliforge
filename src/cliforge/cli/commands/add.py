@@ -30,9 +30,24 @@ def add_openapi(
     elif api_key:
         auth_headers["X-API-Key"] = api_key
 
-    metadata: dict = {}
-    if base_url:
-        metadata["base_url"] = base_url
+    async def _discover() -> tuple[list, str]:
+        connector = OpenApiConnector(
+            namespace=namespace,
+            source=source,
+            base_url=base_url or None,
+            auth_headers=auth_headers or None,
+        )
+        tools = await connector.discover()
+        return tools, connector.base_url  # base_url is resolved inside discover()
+
+    try:
+        tools, resolved_base_url = anyio.run(_discover)
+    except Exception as exc:
+        print_error(f"Failed to load spec: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    # Always persist the resolved base URL so execution never has to re-detect it.
+    metadata: dict = {"base_url": resolved_base_url}
 
     config = ConnectorConfig(
         type="openapi",
@@ -40,22 +55,6 @@ def add_openapi(
         source=source,
         metadata=metadata,
     )
-
-    async def _discover() -> list:
-        connector = OpenApiConnector(
-            namespace=namespace,
-            source=source,
-            base_url=base_url or None,
-            auth_headers=auth_headers or None,
-        )
-        return await connector.discover()
-
-    try:
-        tools = anyio.run(_discover)
-    except Exception as exc:
-        print_error(f"Failed to load spec: {exc}")
-        raise typer.Exit(code=1) from exc
-
     registry.add_connector(config)
     registry.cache_tools(tools)
 

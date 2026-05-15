@@ -55,28 +55,32 @@ def refresh_connector(
         print_error(f"Connector '{namespace}' not found.")
         raise typer.Exit(code=1)
 
-    async def _refresh() -> list:
+    async def _refresh() -> tuple[list, str | None]:
         if config.type == "openapi":
             from cliforge.connectors.openapi import OpenApiConnector
-            base_url = config.metadata.get("base_url")
             connector = OpenApiConnector(
                 namespace=namespace,
                 source=config.source,
-                base_url=base_url,
+                base_url=config.metadata.get("base_url"),
             )
-            return await connector.discover()
+            tools = await connector.discover()
+            return tools, connector.base_url
         elif config.type == "mcp":
             from cliforge.connectors.mcp import McpConnector
             connector = McpConnector(namespace=namespace, command=config.source)
-            return await connector.discover()
+            return await connector.discover(), None
         else:
             raise ValueError(f"Unknown connector type: {config.type}")
 
     try:
-        tools = anyio.run(_refresh)
+        tools, resolved_base_url = anyio.run(_refresh)
     except Exception as exc:
         print_error(f"Refresh failed: {exc}")
         raise typer.Exit(code=1) from exc
+
+    if resolved_base_url is not None:
+        config.metadata["base_url"] = resolved_base_url
+        registry.add_connector(config)
 
     registry.cache_tools(tools)
     print_success(f"Refreshed '{namespace}': {len(tools)} tools.")

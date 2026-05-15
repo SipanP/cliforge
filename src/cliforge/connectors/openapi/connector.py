@@ -49,14 +49,15 @@ class OpenApiConnector:
         self.namespace = namespace
         self.source = source
         self._base_url = base_url
+        self.base_url: str | None = base_url  # resolved after discover()
         self.auth_headers = auth_headers or {}
         self._tools: dict[str, Tool] = {}
         self._spec: dict[str, Any] | None = None
 
     async def discover(self) -> list[Tool]:
         self._spec = await load_spec(self.source)
-        base_url = self._base_url or _detect_base_url(self._spec, self.source)
-        tools = parse_spec(self._spec, self.namespace, base_url)
+        self.base_url = self._base_url or _detect_base_url(self._spec, self.source)
+        tools = parse_spec(self._spec, self.namespace, self.base_url)
         self._tools = {t.id: t for t in tools}
         logger.info("Discovered %d tools from %s", len(tools), self.source)
         return tools

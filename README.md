@@ -2,7 +2,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-100%20passing-brightgreen)](./tests)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
@@ -121,6 +121,24 @@ uv run cliforge --help
 
 ## Quick Start
 
+Once you add a connector, you run its tools directly using the namespace as a command prefix — **no forge, no subcommand, just type it**:
+
+```bash
+cliforge <namespace> <tool> [--flags]
+```
+
+For example:
+
+```bash
+cliforge petstore addPet --name "Rex" --status available
+cliforge petstore listPets --limit 5
+cliforge petstore getPetById --petId 42
+```
+
+> Type `cliforge` on its own to see registered namespaces and live examples.
+
+---
+
 ### Add an OpenAPI connector
 
 ```bash
@@ -187,8 +205,9 @@ cliforge schema github listUsers
 
 ### Execute a tool
 
+The namespace you registered IS the command prefix. There is no extra step — just type the namespace and tool name directly:
+
 ```bash
-# Dynamic dispatch: cliforge <namespace> <tool-name> [--flags]
 cliforge github listUsers --limit 10
 
 cliforge github createUser --name "Alice" --email "alice@example.com"
@@ -196,6 +215,13 @@ cliforge github createUser --name "Alice" --email "alice@example.com"
 cliforge github getUser --userId "abc123"
 
 cliforge github createIssue --title "Bug report" --body "Details here"
+```
+
+You can also browse without knowing the tool names:
+
+```bash
+cliforge github                  # list all tools in the github namespace
+cliforge github listUsers --help # show flags and types for a specific tool
 ```
 
 ---
@@ -422,6 +448,12 @@ CliForge maintains a persistent registry at `~/.cliforge/`:
 ```
 
 Tools are cached on `add` and reloaded on startup. Use `refresh` to re-discover after spec changes.
+
+The resolved base URL for each OpenAPI connector is stored in `connectors.json` at `add` time, so execution never needs to re-load the spec. If you suspect a stale base URL is causing errors, run:
+
+```bash
+cliforge refresh <namespace>
+```
 
 ---
 
