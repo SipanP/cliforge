@@ -15,7 +15,7 @@ from rich.table import Table
 
 from cliforge.cli.commands.add import add_app
 from cliforge.cli.commands.connectors import connectors_app
-from cliforge.cli.commands.forge import forge
+from cliforge.cli.commands.forge import forge_app
 from cliforge.cli.commands.tools import tools_app
 
 console = Console()
@@ -31,7 +31,7 @@ app = typer.Typer(
 app.add_typer(add_app, name="add")
 app.add_typer(tools_app, name="tools")
 app.add_typer(connectors_app, name="connectors")
-app.command("forge")(forge)
+app.add_typer(forge_app, name="forge")
 
 
 @app.callback(invoke_without_command=True)

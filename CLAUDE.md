@@ -72,6 +72,8 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `connectors.json` — registered connector configs
 - `registry.json` — cached tool metadata (survives restarts)
 - `credentials.json` — auth headers (mode 600)
+- `forged.json` — tracks forged commands (command name → namespace + script path + install dir + created_at)
+- `config.json` — user preferences (currently: `forge.default_install_dir`)
 - Tools are cached on `add` and reloaded on every startup
 - `refresh` re-discovers and overwrites cached tools
 
@@ -91,7 +93,10 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `cliforge connectors list/remove/refresh`
 - `cliforge namespaces` — quick overview with tool counts
 - `cliforge refresh <namespace>`
-- `cliforge forge <namespace> <command-name> [--install-dir] [--force] [--dry-run]`
+- `cliforge forge create <namespace> <command-name> [--install-dir] [--force] [--dry-run] [--set-default]`
+- `cliforge forge list [--output]`
+- `cliforge forge remove <command-name> [--keep-file]`
+- `cliforge forge config [--default-install-dir]`
 
 **Dynamic dispatch** (the main UX path):
 - `cliforge <namespace>` — lists all tools in that namespace
@@ -100,10 +105,13 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `cliforge <namespace> <tool> [--flags]` — executes the tool
 - `--output json|table|raw` stripped before execution, defaults to `json`
 
-**Forge:**
-- Generates a `#!/bin/sh` wrapper (`.bat` on Windows) at `~/.local/bin/<name>`
-- Forged command delegates entirely to `cliforge <namespace> "$@"`
-- All dynamic dispatch features work through the forged command transparently
+**Forge (`forge_app` sub-group, consistent with `add_app`/`connectors_app` pattern):**
+- `create`: generates a `#!/bin/sh` wrapper (`.bat` on Windows), writes to configured or default dir, tracks in `forged.json`
+- `list`: table/JSON view of all tracked forged commands
+- `remove`: deletes script and removes from `forged.json`; refuses to delete foreign files; `--keep-file` untracks without deleting
+- `config`: view or set `default_install_dir` persisted in `config.json`
+- Forged command delegates entirely to `cliforge <namespace> "$@"` — stays in sync automatically
+- Distinguishes own scripts (contain `# Forged by cliforge:` marker) from foreign files at conflict time
 
 ### Output modes
 - `json` (default) — pretty-printed, deterministic, LLM-friendly
@@ -111,7 +119,7 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `raw` — compact single-line JSON
 
 ### Tests
-- 73 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge, and end-to-end workflows
+- 85 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (create/list/remove/config), and end-to-end workflows
 - Run with: `uv run pytest`
 
 ---
@@ -153,7 +161,15 @@ OpenAPI specs loaded from a remote URL may have `servers: [{url: /api/v3}]` — 
 
 ## Forged commands are pure shell delegation
 
-The forge implementation is deliberately minimal — a one-line `exec cliforge <namespace> "$@"`. No code generation, no schema baking, no copying of tool data. The forged command stays in sync with the registry automatically because it always calls the live `cliforge` binary.
+The forge script is deliberately minimal — a one-line `exec cliforge <namespace> "$@"`. No code generation, no schema baking, no copying of tool data. The forged command stays in sync with the registry automatically because it always calls the live `cliforge` binary.
+
+## Forge is a sub-app, not a single command
+
+`forge` follows the same pattern as `add`, `tools`, and `connectors` — a `typer.Typer()` sub-app registered via `app.add_typer(forge_app, name="forge")`. Subcommands: `create`, `list`, `remove`, `config`. This is the reason `cliforge forge create github gh` has an explicit verb rather than `cliforge forge github gh` — typer resolves subcommand names before positional arguments, so any first-after-`forge` word that matches a registered subcommand name would be consumed as the subcommand, not the namespace.
+
+## Forge tracks state in `forged.json`
+
+`forge create` records `{command_name, namespace, script_path, install_dir, created_at}` in `~/.cliforge/forged.json`. `forge list` reads this. `forge remove` reads it to find the path and then deletes the entry. Scripts contain a `# Forged by cliforge:` header that lets us distinguish our files from foreign ones at conflict time, without needing to check `forged.json` (which may not have an entry for scripts created by older versions).
 
 ---
 
@@ -177,7 +193,10 @@ src/cliforge/
 │       ├── add.py               cliforge add openapi / add mcp
 │       ├── tools.py             cliforge tools / inspect / schema (as a typer sub-group)
 │       ├── connectors.py        cliforge connectors list/remove/refresh
-│       └── forge.py             cliforge forge — script generation + install
+│       └── forge.py             forge_app sub-group: create/list/remove/config
+│                                forge_app is registered via app.add_typer(), NOT
+│                                app.command() — keeping the pattern consistent with
+│                                add_app, connectors_app, tools_app.
 │
 ├── connectors/
 │   ├── base.py                  Connector Protocol definition (discover + execute)
@@ -294,7 +313,7 @@ respx       httpx mock for tests
 
 ```bash
 uv sync --dev          # install all dependencies
-uv run pytest          # run all 73 tests
+uv run pytest          # run all 85 tests
 uv run pytest -v       # verbose
 uv run mypy src/       # type check
 uv run ruff check src/ # lint
@@ -315,3 +334,5 @@ uv tool install . --reinstall  # update after code changes
 4. **The entry point must be `cliforge.main:main`**, not `cliforge.main:app`. The `app` object bypasses `main()`'s pre-dispatch routing, breaking all namespace commands.
 
 5. **`x-param-in` is internal metadata** — it should never appear in user-facing output like `cliforge schema`. It exists solely to route parameters during execution. Consider stripping it from `schema` command output in future.
+
+6. **`forge` is a sub-app (`add_typer`), not a command (`app.command`)** — this is required for `forge list`, `forge remove`, `forge config` to work as subcommands. Reverting to `app.command("forge")(forge_fn)` would break the sub-group routing.

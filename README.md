@@ -2,7 +2,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![Tests](https://img.shields.io/badge/tests-73%20passing-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](./tests)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
@@ -234,14 +234,14 @@ cliforge connectors remove github
 
 ## Forge — Standalone Namespace Commands
 
-`forge` generates a thin shell wrapper that makes a registered namespace available as its own command. Once forged, you never need to type `cliforge <namespace>` again.
+`forge create` generates a thin shell wrapper that makes a registered namespace available as its own command. Once forged, you never need to type `cliforge <namespace>` again.
 
 ```bash
 # Register a connector
 cliforge add openapi github ./github.yaml
 
 # Forge a standalone 'gh' command
-cliforge forge github gh
+cliforge forge create github gh
 # Installed: ~/.local/bin/gh
 
 # Now use it directly
@@ -251,7 +251,7 @@ gh createUser --help         # show parameters for a tool
 gh --help                    # same as gh (shows tools)
 ```
 
-The generated script is a one-liner:
+The generated script delegates entirely to cliforge and stays in sync with the registry automatically:
 
 ```sh
 #!/bin/sh
@@ -259,18 +259,49 @@ The generated script is a one-liner:
 exec cliforge github "$@"
 ```
 
-### Options
+### Create options
 
 ```bash
 # Preview the script without installing
-cliforge forge github gh --dry-run
+cliforge forge create github gh --dry-run
 
 # Install to a custom directory
-cliforge forge github gh --install-dir /usr/local/bin
+cliforge forge create github gh --install-dir /usr/local/bin
 
-# Overwrite an existing command
-cliforge forge github gh --force
+# Install to a custom directory and save it as the new default
+cliforge forge create github gh --install-dir /usr/local/bin --set-default
+
+# Overwrite an existing cliforge script (re-forge)
+cliforge forge create github gh --force
 ```
+
+### Manage forged commands
+
+```bash
+# List all forged commands
+cliforge forge list
+
+# List as JSON
+cliforge forge list --output json
+
+# Remove a forged command (deletes the script)
+cliforge forge remove gh
+
+# Untrack without deleting the file
+cliforge forge remove gh --keep-file
+```
+
+### Configure the default install directory
+
+```bash
+# View current configuration
+cliforge forge config
+
+# Set a custom default (used by all future forge create calls)
+cliforge forge config --default-install-dir ~/bin
+```
+
+CliForge distinguishes between scripts it created and foreign files at the same path. Overwriting a file you didn't create requires `--force` and prints a warning.
 
 ### PATH setup
 
@@ -279,6 +310,12 @@ cliforge forge github gh --force
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+### Updating a forged command
+
+Since forged scripts are pure shell delegation (`exec cliforge <namespace> "$@"`), they automatically reflect registry changes — tool additions, schema updates, and auth changes take effect immediately without re-forging.
+
+To rename a command or move it to a different directory, just re-run `forge create` with `--force`.
 
 ---
 
@@ -319,7 +356,9 @@ CliForge maintains a persistent registry at `~/.cliforge/`:
 ~/.cliforge/
 ├── connectors.json    # Registered connector configs
 ├── registry.json      # Cached tool metadata
-└── credentials.json   # Stored auth credentials (mode 600)
+├── credentials.json   # Stored auth credentials (mode 600)
+├── forged.json        # Tracked forged commands (name → path mapping)
+└── config.json        # User preferences (e.g. default forge install dir)
 ```
 
 Tools are cached on `add` and reloaded on startup. Use `refresh` to re-discover after spec changes.
@@ -339,7 +378,7 @@ src/cliforge/
 │       ├── add.py             # cliforge add openapi/mcp
 │       ├── tools.py           # cliforge tools / inspect / schema
 │       ├── connectors.py      # cliforge connectors list/remove/refresh
-│       └── forge.py           # cliforge forge <namespace> <command>
+│       └── forge.py           # cliforge forge create/list/remove/config
 ├── connectors/
 │   ├── base.py                # Connector Protocol
 │   ├── openapi/

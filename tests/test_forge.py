@@ -1,4 +1,4 @@
-"""Tests for the forge command."""
+"""Tests for the forge command group."""
 
 import stat
 import sys
@@ -13,6 +13,10 @@ from cliforge.cli.app import app
 runner = CliRunner()
 
 
+# ---------------------------------------------------------------------------
+# forge create
+# ---------------------------------------------------------------------------
+
 def test_forge_creates_script(tmp_path, example_spec_path):
     registry_dir = tmp_path / ".cliforge"
     install_dir = tmp_path / "bin"
@@ -20,7 +24,7 @@ def test_forge_creates_script(tmp_path, example_spec_path):
     with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
         runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
         result = runner.invoke(
-            app, ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir)]
+            app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)]
         )
 
     assert result.exit_code == 0, result.output
@@ -37,7 +41,7 @@ def test_forge_script_is_executable(tmp_path, example_spec_path):
 
     with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
         runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
-        runner.invoke(app, ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
 
     script = install_dir / "myapi-cmd"
     assert script.stat().st_mode & stat.S_IXUSR
@@ -49,13 +53,31 @@ def test_forge_refuses_overwrite_without_force(tmp_path, example_spec_path):
 
     with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
         runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
-        runner.invoke(app, ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
         result = runner.invoke(
-            app, ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir)]
+            app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)]
         )
 
     assert result.exit_code == 1
-    assert "already exists" in result.output
+    assert "already forged" in result.output
+
+
+def test_forge_refuses_overwrite_foreign_file(tmp_path, example_spec_path):
+    """A file not created by cliforge gets a distinct error message."""
+    registry_dir = tmp_path / ".cliforge"
+    install_dir = tmp_path / "bin"
+    install_dir.mkdir(parents=True)
+    foreign = install_dir / "myapi-cmd"
+    foreign.write_text("#!/bin/sh\necho 'I am something else'\n")
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        result = runner.invoke(
+            app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)]
+        )
+
+    assert result.exit_code == 1
+    assert "not created by cliforge" in result.output
 
 
 def test_forge_force_overwrites(tmp_path, example_spec_path):
@@ -64,10 +86,10 @@ def test_forge_force_overwrites(tmp_path, example_spec_path):
 
     with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
         runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
-        runner.invoke(app, ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
         result = runner.invoke(
             app,
-            ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir), "--force"],
+            ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir), "--force"],
         )
 
     assert result.exit_code == 0
@@ -76,7 +98,7 @@ def test_forge_force_overwrites(tmp_path, example_spec_path):
 def test_forge_unknown_namespace(tmp_path):
     registry_dir = tmp_path / ".cliforge"
     with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
-        result = runner.invoke(app, ["forge", "nope", "cmd"])
+        result = runner.invoke(app, ["forge", "create", "nope", "cmd"])
     assert result.exit_code == 1
     assert "not registered" in result.output
 
@@ -88,7 +110,7 @@ def test_forge_dry_run(tmp_path, example_spec_path):
     with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
         runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
         result = runner.invoke(
-            app, ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir), "--dry-run"]
+            app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir), "--dry-run"]
         )
 
     assert result.exit_code == 0
@@ -102,9 +124,164 @@ def test_forge_script_content(tmp_path, example_spec_path):
 
     with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
         runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
-        runner.invoke(app, ["forge", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
 
     script = install_dir / "myapi-cmd"
     content = script.read_text()
     assert "myapi" in content
     assert "myapi-cmd" in content
+
+
+def test_forge_tracks_in_forged_json(tmp_path, example_spec_path):
+    registry_dir = tmp_path / ".cliforge"
+    install_dir = tmp_path / "bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+
+    import json
+    forged_file = registry_dir / "forged.json"
+    assert forged_file.exists()
+    data = json.loads(forged_file.read_text())
+    assert "myapi-cmd" in data
+    assert data["myapi-cmd"]["namespace"] == "myapi"
+
+
+# ---------------------------------------------------------------------------
+# forge list
+# ---------------------------------------------------------------------------
+
+def test_forge_list_empty(tmp_path):
+    registry_dir = tmp_path / ".cliforge"
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        result = runner.invoke(app, ["forge", "list"])
+    assert result.exit_code == 0
+    assert "No forged commands" in result.output
+
+
+def test_forge_list_shows_created(tmp_path, example_spec_path):
+    registry_dir = tmp_path / ".cliforge"
+    install_dir = tmp_path / "bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        result = runner.invoke(app, ["forge", "list"])
+
+    assert result.exit_code == 0
+    assert "myapi-cmd" in result.output
+    assert "myapi" in result.output
+
+
+def test_forge_list_json(tmp_path, example_spec_path):
+    registry_dir = tmp_path / ".cliforge"
+    install_dir = tmp_path / "bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        result = runner.invoke(app, ["forge", "list", "--output", "json"])
+
+    assert result.exit_code == 0
+    import json
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert data[0]["command_name"] == "myapi-cmd"
+
+
+# ---------------------------------------------------------------------------
+# forge remove
+# ---------------------------------------------------------------------------
+
+def test_forge_remove(tmp_path, example_spec_path):
+    registry_dir = tmp_path / ".cliforge"
+    install_dir = tmp_path / "bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        result = runner.invoke(app, ["forge", "remove", "myapi-cmd"])
+
+    assert result.exit_code == 0
+    assert not (install_dir / "myapi-cmd").exists()
+
+
+def test_forge_remove_untracked(tmp_path):
+    registry_dir = tmp_path / ".cliforge"
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        result = runner.invoke(app, ["forge", "remove", "nonexistent"])
+    assert result.exit_code == 1
+    assert "not tracked" in result.output
+
+
+def test_forge_remove_keep_file(tmp_path, example_spec_path):
+    registry_dir = tmp_path / ".cliforge"
+    install_dir = tmp_path / "bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd", "--install-dir", str(install_dir)])
+        result = runner.invoke(app, ["forge", "remove", "myapi-cmd", "--keep-file"])
+
+    assert result.exit_code == 0
+    assert (install_dir / "myapi-cmd").exists()
+
+
+# ---------------------------------------------------------------------------
+# forge config
+# ---------------------------------------------------------------------------
+
+def test_forge_config_show(tmp_path):
+    registry_dir = tmp_path / ".cliforge"
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        result = runner.invoke(app, ["forge", "config"])
+    assert result.exit_code == 0
+    assert "install dir" in result.output.lower()
+
+
+def test_forge_config_set_default(tmp_path):
+    registry_dir = tmp_path / ".cliforge"
+    custom_dir = tmp_path / "custom-bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        result = runner.invoke(
+            app, ["forge", "config", "--default-install-dir", str(custom_dir)]
+        )
+
+    assert result.exit_code == 0
+    assert str(custom_dir) in result.output
+
+    import json
+    cfg = json.loads((registry_dir / "config.json").read_text())
+    assert cfg["forge"]["default_install_dir"] == str(custom_dir)
+
+
+def test_forge_create_uses_configured_default(tmp_path, example_spec_path):
+    registry_dir = tmp_path / ".cliforge"
+    custom_dir = tmp_path / "custom-bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["forge", "config", "--default-install-dir", str(custom_dir)])
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        result = runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd"])
+
+    assert result.exit_code == 0, result.output
+    assert (custom_dir / "myapi-cmd").exists()
+
+
+def test_forge_set_default_via_create(tmp_path, example_spec_path):
+    """--set-default on forge create saves the dir for future calls."""
+    registry_dir = tmp_path / ".cliforge"
+    custom_dir = tmp_path / "custom-bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(
+            app,
+            ["forge", "create", "myapi", "myapi-cmd",
+             "--install-dir", str(custom_dir), "--set-default"],
+        )
+        runner.invoke(app, ["forge", "create", "myapi", "myapi-cmd2"])
+
+    assert (custom_dir / "myapi-cmd2").exists()
