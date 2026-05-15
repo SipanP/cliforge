@@ -48,8 +48,7 @@ def main() -> None:
     #           and: cliforge <namespace>   (lists tools in that namespace)
     if args and args[0] not in _STATIC_COMMANDS and not args[0].startswith("-"):
         try:
-            if handle_dynamic_dispatch(args):
-                return
+            handled = handle_dynamic_dispatch(args)
         except SystemExit as exc:
             sys.exit(exc.code)
         except Exception as exc:
@@ -58,6 +57,19 @@ def main() -> None:
                 sys.exit(exc.exit_code)
             import typer
             typer.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
+        else:
+            if handled:
+                return
+            # Not a known namespace — give a clearer error than typer's
+            # generic "No such command" before handing off to typer.
+            import typer
+            typer.echo(
+                f"Error: '{args[0]}' is not a recognised command or registered namespace.\n"
+                f"  Commands:   cliforge --help\n"
+                f"  Namespaces: cliforge",
+                err=True,
+            )
             sys.exit(1)
 
     sys.argv = [sys.argv[0]] + args

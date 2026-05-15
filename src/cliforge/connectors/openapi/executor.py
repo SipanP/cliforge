@@ -76,7 +76,7 @@ async def execute_openapi(
 
         except httpx.TransportError as exc:
             last_error = exc
-            logger.warning("Attempt %d failed: %s", attempt + 1, exc)
+            logger.debug("Attempt %d failed: %s", attempt + 1, exc)
             if attempt < DEFAULT_RETRIES - 1:
                 import asyncio
                 await asyncio.sleep(2**attempt)

@@ -74,4 +74,16 @@ def show_schema(
         print_error(f"Tool not found: {namespace}.{name}")
         raise typer.Exit(code=1)
 
-    print(json.dumps(tool.input_schema, indent=2, sort_keys=True))
+    schema = _strip_internal_keys(tool.input_schema)
+    print(json.dumps(schema, indent=2, sort_keys=True))
+
+
+def _strip_internal_keys(schema: dict) -> dict:
+    """Return a copy of the schema with x-param-in removed from all properties."""
+    result = {k: v for k, v in schema.items() if k != "x-param-in"}
+    if "properties" in result:
+        result["properties"] = {
+            name: _strip_internal_keys(prop)
+            for name, prop in result["properties"].items()
+        }
+    return result
