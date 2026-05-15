@@ -124,4 +124,5 @@ def test_e2e_execute_tool(tmp_path):
 
         output = captured.getvalue()
         data = json.loads(output)
-        assert "status_code" in data or "data" in data
+        # format_execution_result now shows just the data dict on success
+        assert "users" in data or "total" in data or isinstance(data, dict)

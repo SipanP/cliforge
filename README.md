@@ -2,7 +2,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![Tests](https://img.shields.io/badge/tests-100%20passing-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-105%20passing-brightgreen)](./tests)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
@@ -217,6 +217,33 @@ cliforge github getUser --userId "abc123"
 cliforge github createIssue --title "Bug report" --body "Details here"
 ```
 
+If you omit a required parameter, CliForge catches it **before sending the request** and shows you exactly what's needed:
+
+```
+Error: createUser — 2 validation issue(s):
+  • root: 'name' is a required property
+  • root: 'email' is a required property
+
+  ┌─ Parameters ──────────────────────────────────────────────────────────┐
+  │  Flag      Type    Required  Location  Description                    │
+  │  --name    string  yes       body      Full name                      │
+  │  --email   string  yes       body      Email address                  │
+  └───────────────────────────────────────────────────────────────────────┘
+
+  Example:  cliforge github createUser --name "value" --email "value"
+```
+
+When a server returns an error response, you get a clean summary instead of a raw dump:
+
+```
+Error (HTTP 400)
+
+  name is required
+
+  See parameters:  cliforge github createUser --help
+  Full response:   cliforge github createUser --output raw
+```
+
 You can also browse without knowing the tool names:
 
 ```bash
@@ -229,15 +256,17 @@ cliforge github listUsers --help # show flags and types for a specific tool
 ## Output Modes
 
 ```bash
-# JSON (default) — LLM-compatible, deterministic
+# JSON (default) — shows just the response data, LLM-compatible
 cliforge github listUsers --output json
 
 # Rich table
 cliforge github listUsers --output table
 
-# Raw (compact JSON, no formatting)
+# Raw (compact JSON with full {status_code, data, success} wrapper — for scripts)
 cliforge github listUsers --output raw
 ```
+
+> On error responses, `--output raw` is the way to see the full server response for debugging.
 
 ---
 

@@ -103,9 +103,14 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `cliforge <namespace>` — lists all tools in that namespace with a prominent banner showing the direct execution pattern
 - `cliforge <namespace> --help` — same as above
 - `cliforge <namespace> <tool> --help` — renders parameter table + usage example
-- `cliforge <namespace> <tool> [--flags]` — executes the tool
+- `cliforge <namespace> <tool> [--flags]` — executes the tool; validates required params client-side before sending to the server
 - `--output json|table|raw` stripped before execution, defaults to `json`
 - Root `cliforge` help (no args) shows a concrete direct-execution example using the first registered namespace and tool, making it immediately clear that `cliforge <namespace> <tool>` works without any extra setup
+
+**Execution output:**
+- Success (`2xx`): shows just `data` from the response — no status_code/success wrapper cluttering the output
+- Error (`4xx`/`5xx`): shows a clear summary — HTTP status, extracted error message field, and `--help`/`--output raw` hints
+- `--output raw`: always shows the full `{status_code, data, success}` wrapper for scripting/debugging
 
 **Forge (`forge_app` sub-group, consistent with `add_app`/`connectors_app` pattern):**
 - Primary shorthand: `cliforge forge <namespace> [command-name]` — routed to `create` by `main.py` before typer sees it
@@ -123,7 +128,7 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `raw` — compact single-line JSON
 
 ### Tests
-- 100 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), and end-to-end workflows
+- 105 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), pre-flight validation, execution result formatting, and end-to-end workflows
 - Run with: `uv run pytest`
 
 ---
@@ -163,6 +168,21 @@ All user-supplied text (tool descriptions, parameter descriptions) that gets pas
 
 OpenAPI specs loaded from a remote URL may have `servers: [{url: /api/v3}]` — a relative path with no host. We resolve it against the origin of the source URL. Local files with relative server paths fall back to `http://localhost` and emit a warning to use `--base-url`.
 
+## Pre-flight input validation in dynamic dispatch
+
+`dispatch_tool_command()` in `cli/dynamic.py` calls `validate_input(tool, input_data)` before sending any HTTP request. If required params are missing or types are wrong, it prints a formatted error with the parameter table and exits with code 1 — no wasted round-trip to the server. This reuses the existing `jsonschema.Draft7Validator` from `runtime/validation.py`.
+
+The parameter table renderer is extracted to `cli/formatting.py:print_param_table()` so it can be shared between `_print_tool_help()` (the `--help` path) and the pre-flight error path.
+
+## Execution result formatting
+
+`format_execution_result(result, output_mode, tool)` in `cli/formatting.py` is now the single entry point for displaying tool output:
+- **Success + `--output json/table`**: shows just `result["data"]` — no status_code/success wrapper
+- **Error (non-success)**: shows a compact summary to stderr — HTTP status, the most relevant error message field (`message`, `error`, `detail`, etc. checked in order), plus hints to `--help` and `--output raw`
+- **`--output raw`**: always outputs the full wrapper `{status_code, data, success}` for machine consumption
+
+The error message is truncated at 300 characters to avoid verbose Java/server dumps filling the terminal.
+
 ## `base_url` always persisted in connector metadata
 
 `ConnectorConfig.metadata["base_url"]` is always written at `add` time, regardless of whether `--base-url` was passed. The flow is:
@@ -175,9 +195,13 @@ OpenAPI specs loaded from a remote URL may have `servers: [{url: /api/v3}]` — 
 
 `ConnectorConfig.metadata` is a freeform dict — new connector-specific options should go here rather than adding new fields to `ConnectorConfig`.
 
-## Executor fast-fails on invalid URL (no retries)
+## Executor fast-fails on invalid URL; hints refresh on all retry failures
 
-Before the retry loop, `execute_openapi()` checks that the constructed URL starts with `http://` or `https://`. If not, it raises `RuntimeError` immediately with a message telling the user to run `cliforge refresh <namespace>`. This avoids 3× exponential-backoff retries that would never succeed for a structurally invalid URL (e.g. `/api/v3/pets` — a relative path with no host).
+Two separate error paths in `execute_openapi()`:
+
+1. **Missing scheme** (fast-fail, before retry loop): If the constructed URL doesn't start with `http://` or `https://`, raises `RuntimeError` immediately — no retries, direct message with `cliforge refresh <namespace>` hint. Avoids 3× exponential-backoff for a URL that structurally cannot work.
+
+2. **Transport errors** (all retries exhausted): If all 3 retry attempts fail with `httpx.TransportError` (e.g. connection refused to `http://localhost` — common with stale cached tools from before the base_url fix), the final `RuntimeError` also includes `cliforge refresh <namespace>` in its message. This handles the case where the URL has a valid scheme but the wrong host.
 
 ## Connector metadata stored at registration time
 
@@ -214,9 +238,14 @@ src/cliforge/
 │   │                            _print_tool_help(), _print_namespace_panel() here.
 │   │                            _print_namespace_panel() shows a prominent direct-execution
 │   │                            banner so users know `cliforge <ns> <tool>` works immediately.
-│   ├── dynamic.py               dispatch_tool_command(): parses raw --flags against
-│   │                            schema and calls connector.execute().
+│   ├── dynamic.py               dispatch_tool_command(): parses raw --flags against schema,
+│   │                            runs validate_input() pre-flight, calls connector.execute(),
+│   │                            then formats output via format_execution_result().
 │   ├── formatting.py            format_result(), output_json/table/raw, print_error/success.
+│   │                            print_param_table(): shared param table renderer (used by
+│   │                            _print_tool_help and pre-flight validation errors).
+│   │                            format_execution_result(): smart formatter — shows just data
+│   │                            on success, compact error summary on non-2xx responses.
 │   └── commands/
 │       ├── add.py               cliforge add openapi / add mcp
 │       ├── tools.py             cliforge tools / inspect / schema (as a typer sub-group)
@@ -343,7 +372,7 @@ respx       httpx mock for tests
 
 ```bash
 uv sync --dev          # install all dependencies
-uv run pytest          # run all 100 tests
+uv run pytest          # run all 105 tests
 uv run pytest -v       # verbose
 uv run mypy src/       # type check
 uv run ruff check src/ # lint

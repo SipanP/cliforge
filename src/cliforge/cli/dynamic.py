@@ -10,9 +10,24 @@ from typing import Any
 import anyio
 import typer
 
-from cliforge.cli.formatting import format_result, print_error
+from cliforge.cli.formatting import (
+    format_execution_result,
+    format_result,
+    print_error,
+    print_param_table,
+)
 from cliforge.models.tool import Tool
+from cliforge.runtime.validation import ValidationError, validate_input
 from cliforge.schema.inspection import json_type_to_python, schema_to_cli_params
+
+_EXAMPLE_VALUES: dict[str, str] = {
+    "string": '"value"',
+    "integer": "42",
+    "number": "3.14",
+    "boolean": "true",
+    "array": '"[...]"',
+    "object": '"{...}"',
+}
 
 
 def _coerce_value(value: str, json_type: str) -> Any:
@@ -100,6 +115,27 @@ def dispatch_tool_command(
                 positional_idx += 1
             i += 1
 
+    # Pre-flight: validate required params before sending to the server.
+    try:
+        validate_input(tool, input_data)
+    except ValidationError as exc:
+        from rich.console import Console
+        from rich.markup import escape
+        err = Console(stderr=True)
+        err.print(f"\n[red bold]Error:[/red bold] [bold]{tool.name}[/bold] — {len(exc.errors)} validation issue(s):")
+        for msg in exc.errors:
+            err.print(f"  [red]•[/red] {escape(msg)}")
+        err.print()
+        print_param_table(params)
+        required_params = [p for p in params if p["required"]]
+        example_parts = [f"cliforge {tool.namespace} {tool.name}"]
+        for p in required_params[:3]:
+            example_parts.append(f"--{p['name']} {_EXAMPLE_VALUES.get(p['type'], '\"value\"')}")
+        if len(required_params) > 3:
+            example_parts.append("...")
+        err.print(f"  [dim]Example:[/dim]  [bold]{' '.join(example_parts)}[/bold]\n")
+        raise typer.Exit(code=1)
+
     async def _run() -> Any:
         return await connector.execute(tool.id, input_data)
 
@@ -109,4 +145,4 @@ def dispatch_tool_command(
         print_error(str(exc))
         raise typer.Exit(code=1) from exc
 
-    format_result(result, output_mode)
+    format_execution_result(result, output_mode, tool)
