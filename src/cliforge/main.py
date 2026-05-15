@@ -9,7 +9,7 @@ _log_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
 
 _STATIC_COMMANDS = {
     "add", "tools", "inspect", "schema", "connectors",
-    "refresh", "namespaces", "--help", "-h", "--version",
+    "refresh", "namespaces", "forge", "--help", "-h", "--version",
 }
 
 

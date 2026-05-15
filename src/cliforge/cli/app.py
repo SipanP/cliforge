@@ -15,6 +15,7 @@ from rich.table import Table
 
 from cliforge.cli.commands.add import add_app
 from cliforge.cli.commands.connectors import connectors_app
+from cliforge.cli.commands.forge import forge
 from cliforge.cli.commands.tools import tools_app
 
 console = Console()
@@ -30,6 +31,7 @@ app = typer.Typer(
 app.add_typer(add_app, name="add")
 app.add_typer(tools_app, name="tools")
 app.add_typer(connectors_app, name="connectors")
+app.command("forge")(forge)
 
 
 @app.callback(invoke_without_command=True)
@@ -227,6 +229,11 @@ def handle_dynamic_dispatch(args: list[str]) -> bool:
 
     tool_name = args[1]
     raw_args = args[2:]
+
+    # `cliforge <namespace> --help` — treat as namespace listing
+    if tool_name in ("--help", "-h") and registry.has_connector(namespace):
+        _print_namespace_tools(registry, namespace)
+        return True
 
     # `cliforge <namespace> <tool> --help` — show tool help
     if "--help" in raw_args or "-h" in raw_args:

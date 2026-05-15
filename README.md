@@ -2,7 +2,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![Tests](https://img.shields.io/badge/tests-61%20passing-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-73%20passing-brightgreen)](./tests)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
@@ -26,6 +26,7 @@ A schema-driven runtime that dynamically converts OpenAPI specifications and MCP
 - **Persistent registry** — connectors and tool metadata survive restarts
 - **LLM-friendly output** — deterministic JSON output by default
 - **Pluggable auth** — bearer token, API key, environment variable providers
+- **Forge** — generate a standalone command for any namespace (`cliforge forge github gh`)
 
 ---
 
@@ -231,6 +232,56 @@ cliforge connectors remove github
 
 ---
 
+## Forge — Standalone Namespace Commands
+
+`forge` generates a thin shell wrapper that makes a registered namespace available as its own command. Once forged, you never need to type `cliforge <namespace>` again.
+
+```bash
+# Register a connector
+cliforge add openapi github ./github.yaml
+
+# Forge a standalone 'gh' command
+cliforge forge github gh
+# Installed: ~/.local/bin/gh
+
+# Now use it directly
+gh                           # list all tools in github
+gh listUsers --limit 10      # execute a tool
+gh createUser --help         # show parameters for a tool
+gh --help                    # same as gh (shows tools)
+```
+
+The generated script is a one-liner:
+
+```sh
+#!/bin/sh
+# Forged by cliforge: github -> gh
+exec cliforge github "$@"
+```
+
+### Options
+
+```bash
+# Preview the script without installing
+cliforge forge github gh --dry-run
+
+# Install to a custom directory
+cliforge forge github gh --install-dir /usr/local/bin
+
+# Overwrite an existing command
+cliforge forge github gh --force
+```
+
+### PATH setup
+
+`forge` defaults to `~/.local/bin`. If that directory is not on your `$PATH`, the command will warn you and print the exact line to add to your shell profile:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+---
+
 ## Authentication
 
 CliForge supports three authentication strategies:
@@ -287,7 +338,8 @@ src/cliforge/
 │   └── commands/
 │       ├── add.py             # cliforge add openapi/mcp
 │       ├── tools.py           # cliforge tools / inspect / schema
-│       └── connectors.py      # cliforge connectors list/remove/refresh
+│       ├── connectors.py      # cliforge connectors list/remove/refresh
+│       └── forge.py           # cliforge forge <namespace> <command>
 ├── connectors/
 │   ├── base.py                # Connector Protocol
 │   ├── openapi/
@@ -351,6 +403,7 @@ Tests cover:
 | Runtime dispatch | ✓ |
 | Registry persistence | ✓ |
 | CLI commands | ✓ |
+| Forge command generation | ✓ |
 | End-to-end workflow | ✓ |
 
 ---
