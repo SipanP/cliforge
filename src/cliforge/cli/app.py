@@ -263,12 +263,16 @@ def handle_dynamic_dispatch(args: list[str]) -> bool:
         return False
 
     output_mode = "json"
+    dry_run = False
     filtered_args = []
     i = 0
     while i < len(raw_args):
         if raw_args[i] in ("--output", "-o") and i + 1 < len(raw_args):
             output_mode = raw_args[i + 1]
             i += 2
+        elif raw_args[i] == "--dry-run":
+            dry_run = True
+            i += 1
         else:
             filtered_args.append(raw_args[i])
             i += 1
@@ -276,7 +280,7 @@ def handle_dynamic_dispatch(args: list[str]) -> bool:
     connector = _build_connector(config, namespace, tool)
 
     from cliforge.cli.dynamic import dispatch_tool_command
-    dispatch_tool_command(tool, connector, filtered_args, output_mode)
+    dispatch_tool_command(tool, connector, filtered_args, output_mode, dry_run=dry_run)
     return True
 
 

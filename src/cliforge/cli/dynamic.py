@@ -88,6 +88,7 @@ def dispatch_tool_command(
     connector: Any,
     raw_args: list[str],
     output_mode: str = "json",
+    dry_run: bool = False,
 ) -> None:
     """
     Parse raw CLI args (e.g. ['--title', 'Bug', '--limit', '10']) against the tool schema
@@ -143,6 +144,14 @@ def dispatch_tool_command(
             example_parts.append("...")
         err.print(f"  [dim]Example:[/dim]  [bold]{' '.join(example_parts)}[/bold]\n")
         raise typer.Exit(code=1)
+
+    if dry_run:
+        from cliforge.cli.formatting import print_dry_run
+        from cliforge.connectors.openapi.executor import build_request_info
+        auth_headers = getattr(connector, "auth_headers", None)
+        req_info = build_request_info(tool, input_data, auth_headers, redact_auth=True)
+        print_dry_run(req_info, tool)
+        return
 
     async def _run() -> Any:
         return await connector.execute(tool.id, input_data)

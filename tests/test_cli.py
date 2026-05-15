@@ -426,3 +426,252 @@ def test_root_help_shows_direct_execution_hint(tmp_path, example_spec_path):
     assert result.exit_code == 0
     assert "directly" in result.output.lower() or "namespace" in result.output.lower()
     assert "myapi" in result.output
+
+
+# ---------------------------------------------------------------------------
+# build_request_info
+# ---------------------------------------------------------------------------
+
+def test_build_request_info_query_params():
+    """build_request_info routes query params into query_params dict."""
+    from cliforge.connectors.openapi.executor import build_request_info
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.listUsers",
+        namespace="t",
+        name="listUsers",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "x-param-in": "query"},
+            },
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/users",
+            method="GET",
+        ),
+    )
+    info = build_request_info(tool, {"limit": 5})
+    assert info["method"] == "GET"
+    assert info["url"] == "https://api.example.com/users"
+    assert info["query_params"] == {"limit": 5}
+    assert info["body"] is None
+
+
+def test_build_request_info_body_params():
+    """build_request_info routes body params and sets Content-Type."""
+    from cliforge.connectors.openapi.executor import build_request_info
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.createUser",
+        namespace="t",
+        name="createUser",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "x-param-in": "body"},
+            },
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/users",
+            method="POST",
+        ),
+    )
+    info = build_request_info(tool, {"name": "Alice"})
+    assert info["method"] == "POST"
+    assert info["body"] == {"name": "Alice"}
+    assert info["headers"].get("Content-Type") == "application/json"
+
+
+def test_build_request_info_redacts_auth_headers():
+    """build_request_info with redact_auth=True masks sensitive header values."""
+    from cliforge.connectors.openapi.executor import build_request_info
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.op",
+        namespace="t",
+        name="op",
+        input_schema={"type": "object", "properties": {}},
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/protected",
+            method="GET",
+        ),
+    )
+    auth = {"Authorization": "Bearer secret-token", "X-Correlation-Id": "abc123"}
+    info = build_request_info(tool, {}, auth_headers=auth, redact_auth=True)
+    assert info["headers"]["Authorization"] == "[redacted]"
+    assert info["headers"]["X-Correlation-Id"] == "abc123"
+
+
+def test_build_request_info_path_params():
+    """build_request_info interpolates path params into the URL."""
+    from cliforge.connectors.openapi.executor import build_request_info
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.getUser",
+        namespace="t",
+        name="getUser",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "integer", "x-param-in": "path"},
+            },
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/users/{userId}",
+            method="GET",
+        ),
+    )
+    info = build_request_info(tool, {"userId": 42})
+    assert info["url"] == "https://api.example.com/users/42"
+    assert info["query_params"] is None
+
+
+# ---------------------------------------------------------------------------
+# _log_request
+# ---------------------------------------------------------------------------
+
+def test_log_request_writes_jsonl(tmp_path):
+    """_log_request appends a valid JSON line to the day's log file."""
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="ns.op",
+        namespace="ns",
+        name="op",
+        input_schema={"type": "object", "properties": {}},
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/op",
+            method="GET",
+        ),
+    )
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", tmp_path):
+        from cliforge.connectors.openapi import executor as exec_mod
+        # Force module to use patched DEFAULT_DIR at call time
+        from cliforge.connectors.openapi.executor import _log_request
+        _log_request(tool, "GET", "https://api.example.com/op", 200, True, 42.5)
+
+    log_dir = tmp_path / "logs" / "ns"
+    log_files = list(log_dir.glob("*.log"))
+    assert len(log_files) == 1
+    lines = log_files[0].read_text().strip().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["tool"] == "ns.op"
+    assert entry["method"] == "GET"
+    assert entry["status_code"] == 200
+    assert entry["success"] is True
+    assert abs(entry["duration_ms"] - 42.5) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# --dry-run flag
+# ---------------------------------------------------------------------------
+
+def test_dry_run_prints_request_without_executing():
+    """dispatch_tool_command with dry_run=True prints request info and does not call execute."""
+    from cliforge.cli.dynamic import dispatch_tool_command
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.listUsers",
+        namespace="t",
+        name="listUsers",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "x-param-in": "query"},
+            },
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/users",
+            method="GET",
+        ),
+    )
+
+    execute_called = []
+
+    class FakeConnector:
+        auth_headers = None
+        async def execute(self, tool_id, input_data):
+            execute_called.append(True)
+            return {"status_code": 200, "data": {}, "success": True}
+
+    import io, sys
+    buf = io.StringIO()
+    old_stdout, sys.stdout = sys.stdout, buf
+    try:
+        dispatch_tool_command(tool, FakeConnector(), ["--limit", "5"], "json", dry_run=True)
+    finally:
+        sys.stdout = old_stdout
+
+    assert not execute_called, "execute() must not be called in dry_run mode"
+
+
+def test_dry_run_stops_on_preflight_failure():
+    """dispatch_tool_command with dry_run=True still exits 1 if required params missing."""
+    import click
+    from cliforge.cli.dynamic import dispatch_tool_command
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.createUser",
+        namespace="t",
+        name="createUser",
+        input_schema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string", "x-param-in": "body"},
+            },
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/users",
+            method="POST",
+        ),
+    )
+
+    with pytest.raises(click.exceptions.Exit) as exc_info:
+        dispatch_tool_command(tool, None, [], "json", dry_run=True)
+    assert exc_info.value.exit_code == 1
+
+
+def test_print_dry_run_contains_curl(capsys):
+    """print_dry_run output includes a curl command."""
+    from cliforge.cli.formatting import print_dry_run
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.op",
+        namespace="t",
+        name="op",
+        input_schema={"type": "object", "properties": {}},
+        execution=OpenApiExecution(
+            base_url="https://api.example.com",
+            path="/op",
+            method="GET",
+        ),
+    )
+    req_info = {
+        "method": "GET",
+        "url": "https://api.example.com/op",
+        "query_params": None,
+        "headers": {"Accept": "application/json"},
+        "body": None,
+    }
+    print_dry_run(req_info, tool)
+    captured = capsys.readouterr()
+    assert "curl" in captured.out.lower()
+    assert "https://api.example.com/op" in captured.out

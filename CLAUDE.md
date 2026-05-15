@@ -111,6 +111,8 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - Success (`2xx`): shows just `data` from the response — no status_code/success wrapper cluttering the output
 - Error (`4xx`/`5xx`): shows a clear summary — HTTP status, extracted error message field, and `--help`/`--output raw` hints
 - `--output raw`: always shows the full `{status_code, data, success}` wrapper for scripting/debugging
+- `--dry-run`: shows the full request (URL, headers with auth redacted, body) and a copy-pasteable curl command without sending anything; pre-flight validation still runs so missing required params still error
+- Request logging: every executed OpenAPI request is logged to `~/.cliforge/logs/<namespace>/YYYY-MM-DD.log` in JSONL format (timestamp, tool, method, url, status_code, success, duration_ms); logging failures are silently swallowed so they never break execution
 
 **Forge (`forge_app` sub-group, consistent with `add_app`/`connectors_app` pattern):**
 - Primary shorthand: `cliforge forge <namespace> [command-name]` — routed to `create` by `main.py` before typer sees it
@@ -128,7 +130,7 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `raw` — compact single-line JSON
 
 ### Tests
-- 112 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), pre-flight validation, execution result formatting, and end-to-end workflows
+- 120 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), pre-flight validation, execution result formatting, request logging, dry-run preview, and end-to-end workflows
 - Run with: `uv run pytest`
 
 ---
@@ -203,6 +205,14 @@ Two separate error paths in `execute_openapi()`:
 
 2. **Transport errors** (all retries exhausted): If all 3 retry attempts fail with `httpx.TransportError` (e.g. connection refused to `http://localhost` — common with stale cached tools from before the base_url fix), the final `RuntimeError` also includes `cliforge refresh <namespace>` in its message. This handles the case where the URL has a valid scheme but the wrong host.
 
+## Request logging via `_log_request()` in executor
+
+Every successful or failed HTTP response is logged by `_log_request()` in `connectors/openapi/executor.py`. Log path: `~/.cliforge/logs/<namespace>/YYYY-MM-DD.log` (uses `DEFAULT_DIR` from persistence). Each entry is a single JSON line: `{timestamp, tool, method, url, status_code, success, duration_ms}`. The function is wrapped in `try/except: pass` so logging failures never affect execution. Duration is measured with `time.monotonic()` around the httpx call.
+
+## `--dry-run` flag implementation
+
+`--dry-run` is stripped at the `handle_dynamic_dispatch()` arg-parsing loop in `app.py` (like `--output`) and passed as `dry_run=True` to `dispatch_tool_command()`. Pre-flight validation still runs — if required params are missing, it exits 1 before showing anything. On success, `build_request_info(redact_auth=True)` is called to get the request without sending it, then `print_dry_run()` in `formatting.py` renders the URL, method, headers, body, and a copy-pasteable curl equivalent. For non-OpenAPI tools (MCP), `getattr(connector, "auth_headers", None)` returns `None` safely.
+
 ## Connector metadata stored at registration time
 
 `ConnectorConfig.metadata` is a freeform dict. `base_url` is always stored there (see above). When executing tools from the registry, the connector is reconstructed from this config. New connector-specific options should go into `metadata` rather than adding new fields to `ConnectorConfig`.
@@ -260,7 +270,9 @@ src/cliforge/
 │   ├── openapi/
 │   │   ├── loader.py            load_spec(): YAML/JSON, local/remote
 │   │   ├── parser.py            parse_spec(): paths → Tool objects, $ref resolution
-│   │   ├── executor.py          execute_openapi(): httpx, retries, param routing.
+│   │   ├── executor.py          build_request_info(): request construction for dry-run + execute.
+│   │   │                        _log_request(): JSONL append to ~/.cliforge/logs/<ns>/date.log.
+│   │   │                        execute_openapi(): httpx, retries, param routing, timing+logging.
 │   │   │                        Fast-fails with RuntimeError on missing http/https scheme.
 │   │   └── connector.py        OpenApiConnector. _detect_base_url() handles relative URLs.
 │   │                            connector.base_url is a public attribute set during discover().
@@ -372,7 +384,7 @@ respx       httpx mock for tests
 
 ```bash
 uv sync --dev          # install all dependencies
-uv run pytest          # run all 112 tests
+uv run pytest          # run all 120 tests
 uv run pytest -v       # verbose
 uv run mypy src/       # type check
 uv run ruff check src/ # lint

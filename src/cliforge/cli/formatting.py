@@ -137,3 +137,54 @@ def format_execution_result(result: Any, output_mode: str, tool: Any) -> None:
             f"  [dim]Full response:[/dim]   [bold]cliforge {ns} {name} --output raw[/bold]"
         )
     err_console.print()
+
+
+def print_dry_run(request_info: dict[str, Any], tool: Any) -> None:
+    """Render a request preview and curl equivalent without sending anything."""
+    from rich.syntax import Syntax
+
+    method = request_info["method"]
+    url = request_info["url"]
+    query = request_info.get("query_params") or {}
+    headers = request_info.get("headers") or {}
+    body = request_info.get("body")
+
+    # Build the full URL with query string for display
+    if query:
+        from urllib.parse import urlencode
+        display_url = f"{url}?{urlencode(query)}"
+    else:
+        display_url = url
+
+    console.print()
+    console.print(
+        f"[bold]Dry Run[/bold] — [yellow]{method}[/yellow] "
+        f"[bold]{getattr(tool, 'namespace', '')}[/bold].[cyan]{getattr(tool, 'name', '')}[/cyan]"
+    )
+    console.print(f"\n  [dim]URL:[/dim]     {display_url}")
+    console.print(f"  [dim]Method:[/dim]  {method}")
+
+    if headers:
+        console.print("  [dim]Headers:[/dim]")
+        for k, v in headers.items():
+            console.print(f"           {k}: {v}")
+
+    if body:
+        body_json = json.dumps(body, indent=2)
+        console.print("  [dim]Body:[/dim]")
+        console.print(Syntax(body_json, "json", theme="ansi_dark", indent_guides=False))
+
+    # Build curl command
+    curl_parts = [f"curl -X {method} \\\n  '{display_url}'"]
+    for k, v in headers.items():
+        curl_parts.append(f"  -H '{k}: {v}'")
+    if body:
+        body_compact = json.dumps(body, separators=(",", ":"))
+        curl_parts.append(f"  -d '{body_compact}'")
+    curl_cmd = " \\\n".join(curl_parts)
+
+    console.print()
+    console.print("[dim]Curl equivalent:[/dim]")
+    console.print(Syntax(curl_cmd, "bash", theme="ansi_dark"))
+    console.print()
+
