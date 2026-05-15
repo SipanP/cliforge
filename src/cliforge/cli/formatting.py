@@ -76,11 +76,11 @@ def print_param_table(params: list[dict[str, Any]], c: Console | None = None) ->
     if not params:
         c.print("  [dim]No parameters.[/dim]\n")
         return
-    table = Table(box=box.SIMPLE_HEAD, show_header=True, padding=(0, 1))
-    table.add_column("Flag", style="yellow", no_wrap=True)
-    table.add_column("Type", style="cyan")
-    table.add_column("Required", style="red")
-    table.add_column("Location", style="dim")
+    table = Table(box=box.SIMPLE_HEAD, show_header=True, padding=(0, 1), expand=True)
+    table.add_column("Flag", style="yellow", no_wrap=True, min_width=10)
+    table.add_column("Type", style="cyan", no_wrap=True)
+    table.add_column("Required", style="red", no_wrap=True)
+    table.add_column("Location", style="dim", no_wrap=True)
     table.add_column("Description")
     for p in params:
         req = "yes" if p["required"] else ""

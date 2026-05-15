@@ -128,7 +128,7 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `raw` — compact single-line JSON
 
 ### Tests
-- 105 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), pre-flight validation, execution result formatting, and end-to-end workflows
+- 110 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), pre-flight validation, execution result formatting, and end-to-end workflows
 - Run with: `uv run pytest`
 
 ---
@@ -311,7 +311,7 @@ When a tool is executed via dynamic dispatch, the connector is rebuilt from the 
 `dispatch_tool_command()` in `cli/dynamic.py` hand-rolls `--flag value` parsing. It does not handle:
 - `--flag=value` (equals syntax)
 - boolean flags without a value (`--verbose`)
-- repeated flags for array params (`--tag foo --tag bar`)
+- repeated flags for array params (`--tag foo --tag bar`) — currently arrays accept comma-separated values (`--tags foo,bar`) or a single bare string as a one-element array
 - quoted strings with spaces passed as a single value
 
 Replacing this with a proper click/typer argument parser built from the schema would fix all of these.
@@ -372,7 +372,7 @@ respx       httpx mock for tests
 
 ```bash
 uv sync --dev          # install all dependencies
-uv run pytest          # run all 105 tests
+uv run pytest          # run all 110 tests
 uv run pytest -v       # verbose
 uv run mypy src/       # type check
 uv run ruff check src/ # lint

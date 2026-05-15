@@ -2,7 +2,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![Tests](https://img.shields.io/badge/tests-105%20passing-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-110%20passing-brightgreen)](./tests)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
@@ -215,6 +215,14 @@ cliforge github createUser --name "Alice" --email "alice@example.com"
 cliforge github getUser --userId "abc123"
 
 cliforge github createIssue --title "Bug report" --body "Details here"
+```
+
+Array parameters accept a JSON array (`'["url1","url2"]'`), a comma-separated list (`url1,url2`), or a single bare string (automatically wrapped as a one-element array):
+
+```bash
+cliforge petstore addPet --name Rex --photoUrls https://example.com/pic.jpg
+cliforge petstore addPet --name Rex --photoUrls "url1,url2"
+cliforge petstore addPet --name Rex --photoUrls '["url1","url2"]'
 ```
 
 If you omit a required parameter, CliForge catches it **before sending the request** and shows you exactly what's needed:

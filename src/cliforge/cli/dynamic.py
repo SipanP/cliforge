@@ -37,8 +37,16 @@ def _coerce_value(value: str, json_type: str) -> Any:
         return float(value)
     if json_type == "boolean":
         return value.lower() in {"true", "1", "yes"}
-    if json_type in {"array", "object"}:
+    if json_type == "object":
         return json.loads(value)
+    if json_type == "array":
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else [parsed]
+        except (json.JSONDecodeError, ValueError):
+            # Accept a bare string or comma-separated values as a string array.
+            # Allows: --tags foo,bar  or  --photoUrls https://example.com/pic.jpg
+            return [v.strip() for v in value.split(",")]
     return value
 
 

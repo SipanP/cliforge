@@ -53,6 +53,9 @@ def main() -> None:
         except SystemExit as exc:
             sys.exit(exc.code)
         except Exception as exc:
+            import click
+            if isinstance(exc, click.exceptions.Exit):
+                sys.exit(exc.exit_code)
             import typer
             typer.echo(f"Error: {exc}", err=True)
             sys.exit(1)
