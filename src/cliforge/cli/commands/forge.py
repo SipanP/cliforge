@@ -1,5 +1,6 @@
 """cliforge forge — generate and manage standalone namespace commands."""
 
+import difflib
 import os
 import stat
 import sys
@@ -130,6 +131,16 @@ def _save_forged(data: dict) -> None:
     PersistenceManager().save("forged.json", data)
 
 
+def _ranked_suggestions(word: str, possibilities: list[str], cutoff: float = 0.6) -> list[str]:
+    """Return possibilities ordered by similarity to word.
+
+    Uses difflib.get_close_matches for the top results; falls back to the full
+    list (sorted) when nothing clears the similarity threshold.
+    """
+    close = difflib.get_close_matches(word, possibilities, n=5, cutoff=cutoff)
+    return close if close else sorted(possibilities)
+
+
 @forge_app.command("create", hidden=True)
 def forge_create(
     namespace: str = typer.Argument(..., help="Registered namespace to wrap"),
@@ -163,11 +174,12 @@ def forge_create(
         print_error(f"Namespace '{namespace}' is not registered.")
         connectors = registry.get_connectors()
         if connectors:
-            console.print("\n  [dim]Available namespaces you can forge:[/dim]")
-            for cfg in connectors:
+            ranked = _ranked_suggestions(namespace, [c.namespace for c in connectors])
+            console.print("\n  [dim]Did you mean one of these?[/dim]")
+            for ns in ranked:
                 console.print(
-                    f"    [bold]cliforge forge {cfg.namespace}[/bold]"
-                    f"  [dim]— creates a '{cfg.namespace}' command[/dim]"
+                    f"    [bold]cliforge forge {ns}[/bold]"
+                    f"  [dim]— creates a '{ns}' command[/dim]"
                 )
         else:
             console.print("\n  [dim]No namespaces registered yet. Add one first:[/dim]")
@@ -316,8 +328,9 @@ def forge_remove(
     if command_name not in forged:
         print_error(f"'{command_name}' is not tracked as a forged command.")
         if forged:
-            console.print("\n  [dim]Forged commands you can remove:[/dim]")
-            for name in sorted(forged):
+            ranked = _ranked_suggestions(command_name, list(forged.keys()))
+            console.print("\n  [dim]Did you mean one of these?[/dim]")
+            for name in ranked:
                 entry = forged[name]
                 console.print(
                     f"    [bold]cliforge forge remove {name}[/bold]"

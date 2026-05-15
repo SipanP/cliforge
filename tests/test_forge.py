@@ -362,7 +362,25 @@ def test_forge_unknown_namespace_suggests_alternatives(tmp_path, example_spec_pa
 
     assert result.exit_code == 1
     assert "not registered" in result.output
-    assert "myapi" in result.output  # suggests the registered namespace
+    assert "myapi" in result.output  # falls back to full list when no close match
+
+
+def test_forge_unknown_namespace_fuzzy_orders_by_similarity(tmp_path, example_spec_path):
+    """A near-typo of a registered namespace appears as the top suggestion."""
+    registry_dir = tmp_path / ".cliforge"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(app, ["add", "openapi", "petstore", str(example_spec_path)])
+        # 'myap' is a near-match for 'myapi'; 'petstore' should not appear before it
+        result = runner.invoke(app, ["forge", "create", "myap", "cmd"])
+
+    assert result.exit_code == 1
+    myapi_pos = result.output.find("myapi")
+    petstore_pos = result.output.find("petstore")
+    assert myapi_pos != -1
+    # myapi should appear before petstore (or petstore may not appear at all)
+    assert myapi_pos < petstore_pos or petstore_pos == -1
 
 
 def test_forge_unknown_namespace_no_connectors(tmp_path):
@@ -388,7 +406,26 @@ def test_forge_remove_unknown_suggests_alternatives(tmp_path, example_spec_path)
 
     assert result.exit_code == 1
     assert "not tracked" in result.output
-    assert "myapi-cmd" in result.output  # suggests the tracked command
+    assert "myapi-cmd" in result.output  # falls back to full list when no close match
+
+
+def test_forge_remove_fuzzy_orders_by_similarity(tmp_path, example_spec_path):
+    """A near-typo of a tracked command appears as the top suggestion."""
+    registry_dir = tmp_path / ".cliforge"
+    install_dir = tmp_path / "bin"
+
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        runner.invoke(app, ["forge", "create", "myapi", "gh", "--install-dir", str(install_dir)])
+        runner.invoke(app, ["forge", "create", "myapi", "petstore", "--install-dir", str(install_dir)])
+        # 'g' is closer to 'gh' than to 'petstore'
+        result = runner.invoke(app, ["forge", "remove", "gx"])
+
+    assert result.exit_code == 1
+    gh_pos = result.output.find("gh")
+    petstore_pos = result.output.find("petstore")
+    assert gh_pos != -1
+    assert gh_pos < petstore_pos or petstore_pos == -1
 
 
 def test_forge_already_forged_error_shows_reforge_hint(tmp_path, example_spec_path):
