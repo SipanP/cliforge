@@ -2,7 +2,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen)](./tests)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
@@ -234,24 +234,37 @@ cliforge connectors remove github
 
 ## Forge — Standalone Namespace Commands
 
-`forge create` generates a thin shell wrapper that makes a registered namespace available as its own command. Once forged, you never need to type `cliforge <namespace>` again.
+`cliforge forge` generates a thin shell wrapper that makes a registered namespace available as its own standalone command. Once forged, you never need to type `cliforge <namespace>` again.
+
+### Basic usage
 
 ```bash
-# Register a connector
-cliforge add openapi github ./github.yaml
-
-# Forge a standalone 'gh' command
-cliforge forge create github gh
-# Installed: ~/.local/bin/gh
-
-# Now use it directly
-gh                           # list all tools in github
-gh listUsers --limit 10      # execute a tool
-gh createUser --help         # show parameters for a tool
-gh --help                    # same as gh (shows tools)
+cliforge forge <namespace>
 ```
 
-The generated script delegates entirely to cliforge and stays in sync with the registry automatically:
+By default the command name matches the namespace:
+
+```bash
+cliforge add openapi github ./github.yaml
+
+cliforge forge github
+# → installs 'github' to ~/.local/bin/github
+
+github listUsers --limit 10    # execute a tool
+github createUser --help       # show parameters
+github                         # list all tools
+```
+
+To give the command a different name, pass it as a second argument:
+
+```bash
+cliforge forge github gh
+# → installs 'gh' to ~/.local/bin/gh
+
+gh listUsers --limit 10
+```
+
+The generated script is a one-liner that delegates all arguments to cliforge:
 
 ```sh
 #!/bin/sh
@@ -259,36 +272,79 @@ The generated script delegates entirely to cliforge and stays in sync with the r
 exec cliforge github "$@"
 ```
 
-### Create options
+Because it's pure delegation, the forged command automatically stays in sync with the registry — tool additions, schema updates, and auth changes take effect immediately without re-forging.
+
+### Options
+
+| Flag | What it does |
+|------|-------------|
+| `--install-dir <path>` | Install to a specific directory instead of the default (`~/.local/bin`) |
+| `--set-default` | Save `--install-dir` as the new default for all future forges |
+| `--force` | Overwrite an existing command |
+| `--dry-run` | Preview the script without writing any files |
 
 ```bash
-# Preview the script without installing
-cliforge forge create github gh --dry-run
+# Preview the script that would be installed
+cliforge forge github gh --dry-run
 
 # Install to a custom directory
-cliforge forge create github gh --install-dir /usr/local/bin
+cliforge forge github gh --install-dir /usr/local/bin
 
-# Install to a custom directory and save it as the new default
-cliforge forge create github gh --install-dir /usr/local/bin --set-default
+# Install to a custom directory and make it the new default
+cliforge forge github gh --install-dir ~/bin --set-default
 
-# Overwrite an existing cliforge script (re-forge)
-cliforge forge create github gh --force
+# Replace an existing forged command (e.g. to change the namespace)
+cliforge forge myapi gh --force
+```
+
+### Conflict detection
+
+CliForge checks whether a file at the target path was created by itself (by looking for the `# Forged by cliforge:` marker). You get a different message and hint depending on what it finds:
+
+```
+# If the file was forged by cliforge:
+Error: 'gh' is already forged at '/home/user/.local/bin/gh'.
+
+  To re-forge it (update the namespace or options):
+    cliforge forge github gh --force
+
+# If the file was NOT created by cliforge:
+Error: '/usr/local/bin/python' already exists and was not created by cliforge.
+
+  To overwrite it anyway (replaces the existing file):
+    cliforge forge github gh --force
+
+  Caution: this will replace a command that cliforge did not create.
 ```
 
 ### Manage forged commands
 
 ```bash
-# List all forged commands
+# See all forged commands, where they're installed, and when they were created
 cliforge forge list
 
-# List as JSON
+# JSON output (useful for scripting)
 cliforge forge list --output json
 
-# Remove a forged command (deletes the script)
+# Remove a forged command (deletes the script and untracks it)
 cliforge forge remove gh
 
-# Untrack without deleting the file
+# Untrack a command without deleting the script file
 cliforge forge remove gh --keep-file
+```
+
+`forge remove` also refuses to delete a file it didn't create — use `--keep-file` if you want to untrack a command whose script was replaced externally.
+
+If you pass a name that isn't tracked, the error tells you exactly which commands can be removed:
+
+```
+Error: 'foo' is not tracked as a forged command.
+
+  Forged commands you can remove:
+    cliforge forge remove gh        — removes '/home/user/.local/bin/gh'
+    cliforge forge remove github    — removes '/home/user/.local/bin/github'
+
+  See all:  cliforge forge list
 ```
 
 ### Configure the default install directory
@@ -297,15 +353,16 @@ cliforge forge remove gh --keep-file
 # View current configuration
 cliforge forge config
 
-# Set a custom default (used by all future forge create calls)
+# Set a global default (applies to all future forge calls)
 cliforge forge config --default-install-dir ~/bin
-```
 
-CliForge distinguishes between scripts it created and foreign files at the same path. Overwriting a file you didn't create requires `--force` and prints a warning.
+# Or set it once on the fly and save it at the same time
+cliforge forge github --install-dir ~/bin --set-default
+```
 
 ### PATH setup
 
-`forge` defaults to `~/.local/bin`. If that directory is not on your `$PATH`, the command will warn you and print the exact line to add to your shell profile:
+`forge` defaults to `~/.local/bin`. If that directory is not on your `$PATH`, the command will warn you and print the exact export line to add to your shell profile:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -313,9 +370,12 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### Updating a forged command
 
-Since forged scripts are pure shell delegation (`exec cliforge <namespace> "$@"`), they automatically reflect registry changes — tool additions, schema updates, and auth changes take effect immediately without re-forging.
+Since forged scripts are pure delegation (`exec cliforge <namespace> "$@"`), they stay in sync with the registry automatically. You only need to re-forge if you want to rename the command or move it to a different directory:
 
-To rename a command or move it to a different directory, just re-run `forge create` with `--force`.
+```bash
+cliforge forge github gh --force               # rename namespace to gh
+cliforge forge github gh --install-dir ~/bin --force  # move to a new directory
+```
 
 ---
 

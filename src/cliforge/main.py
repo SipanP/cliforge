@@ -12,6 +12,10 @@ _STATIC_COMMANDS = {
     "refresh", "namespaces", "forge", "--help", "-h", "--version",
 }
 
+# Subcommands of `forge` that are NOT namespace names.
+# Anything else after `forge` is treated as a namespace shorthand.
+_FORGE_SUBCOMMANDS = {"create", "list", "remove", "config"}
+
 
 def _configure_logging(debug: bool = False) -> None:
     level = logging.DEBUG if debug else logging.WARNING
@@ -27,6 +31,17 @@ def main() -> None:
         _configure_logging(debug=True)
     else:
         _configure_logging()
+
+    # Forge shorthand: `cliforge forge <namespace> [command-name] [--opts]`
+    # Rewrites to:     `cliforge forge create <namespace> [command-name] [--opts]`
+    # so typer sees the explicit subcommand while users get the short form.
+    if (
+        len(args) >= 2
+        and args[0] == "forge"
+        and args[1] not in _FORGE_SUBCOMMANDS
+        and not args[1].startswith("-")
+    ):
+        args = ["forge", "create"] + args[1:]
 
     # Route to dynamic dispatch if the first arg isn't a static command.
     # This handles: cliforge <namespace> <tool> [--flags]
