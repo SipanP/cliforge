@@ -2,7 +2,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-de5fe9?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![Tests](https://img.shields.io/badge/tests-112%20passing-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](./tests)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-e92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Typer](https://img.shields.io/badge/CLI-typer-009485)](https://typer.tiangolo.com/)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-6BA539?logo=openapiinitiative&logoColor=white)](https://spec.openapis.org/oas/v3.1.0)
@@ -27,6 +27,8 @@ A schema-driven runtime that dynamically converts OpenAPI specifications and MCP
 - **LLM-friendly output** — deterministic JSON output by default
 - **Pluggable auth** — bearer token, API key, environment variable providers
 - **Forge** — generate a standalone command for any namespace (`cliforge forge github gh`)
+- **Dry-run** — preview the exact request (URL, headers, body, curl) without sending it (`--dry-run`)
+- **Request logging** — every execution is logged to `~/.cliforge/logs/<namespace>/YYYY-MM-DD.log`
 
 ---
 
@@ -193,11 +195,11 @@ cliforge inspect github listUsers
 ```bash
 cliforge schema github listUsers
 
-# Output (deterministic JSON):
+# Output (deterministic JSON, internal routing metadata stripped):
 # {
 #   "properties": {
-#     "limit": {"type": "integer", "x-param-in": "query"},
-#     "offset": {"type": "integer", "x-param-in": "query"}
+#     "limit": {"type": "integer"},
+#     "offset": {"type": "integer"}
 #   },
 #   "type": "object"
 # }
@@ -258,6 +260,40 @@ You can also browse without knowing the tool names:
 cliforge github                  # list all tools in the github namespace
 cliforge github listUsers --help # show flags and types for a specific tool
 ```
+
+### Preview a request without sending it
+
+Pass `--dry-run` to see exactly what would be sent — URL, method, headers (auth values redacted), body — plus a ready-to-paste curl command. Nothing is sent to the server:
+
+```bash
+cliforge github createUser --name "Alice" --email "alice@example.com" --dry-run
+```
+
+```
+Dry Run — POST github.createUser
+
+  URL:     https://api.github.example.com/users
+  Method:  POST
+  Headers:
+           Accept: application/json
+           Authorization: [redacted]
+           Content-Type: application/json
+  Body:
+  {
+    "name": "Alice",
+    "email": "alice@example.com"
+  }
+
+Curl equivalent:
+curl -X POST \
+  'https://api.github.example.com/users' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: [redacted]' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Alice","email":"alice@example.com"}'
+```
+
+Pre-flight validation still runs in dry-run mode — missing required parameters are caught and reported before the preview is shown.
 
 ---
 
@@ -481,7 +517,16 @@ CliForge maintains a persistent registry at `~/.cliforge/`:
 ├── registry.json      # Cached tool metadata
 ├── credentials.json   # Stored auth credentials (mode 600)
 ├── forged.json        # Tracked forged commands (name → path mapping)
-└── config.json        # User preferences (e.g. default forge install dir)
+├── config.json        # User preferences (e.g. default forge install dir)
+└── logs/
+    └── <namespace>/
+        └── YYYY-MM-DD.log  # JSONL request log (one entry per execution)
+```
+
+Each log entry is a single JSON line:
+
+```json
+{"timestamp": "2026-05-15T12:34:56Z", "tool": "github.listUsers", "method": "GET", "url": "https://api.github.com/users", "status_code": 200, "success": true, "duration_ms": 142.3}
 ```
 
 Tools are cached on `add` and reloaded on startup. Use `refresh` to re-discover after spec changes.
@@ -572,6 +617,10 @@ Tests cover:
 | Registry persistence | ✓ |
 | CLI commands | ✓ |
 | Forge command generation | ✓ |
+| Pre-flight validation errors | ✓ |
+| Execution result formatting | ✓ |
+| Request logging (JSONL) | ✓ |
+| Dry-run preview + curl output | ✓ |
 | End-to-end workflow | ✓ |
 
 ---
