@@ -81,4 +81,7 @@ async def execute_openapi(
                 import asyncio
                 await asyncio.sleep(2**attempt)
 
-    raise RuntimeError(f"All {DEFAULT_RETRIES} attempts failed: {last_error}")
+    raise RuntimeError(
+        f"All {DEFAULT_RETRIES} attempts failed: {last_error}\n"
+        f"  If the connector's base URL is stale, run: cliforge refresh {tool.namespace}"
+    )

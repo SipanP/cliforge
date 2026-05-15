@@ -170,6 +170,152 @@ def test_executor_fails_fast_on_invalid_url():
         asyncio.run(execute_openapi(tool, {}))
 
 
+def test_executor_retry_hint_on_transport_failure():
+    """All-retries-failed error includes cliforge refresh hint."""
+    import asyncio
+    import httpx
+    from cliforge.connectors.openapi.executor import execute_openapi
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="test.flaky",
+        namespace="mynamespace",
+        name="flaky",
+        input_schema={"type": "object", "properties": {}},
+        execution=OpenApiExecution(
+            base_url="http://localhost:19999",
+            path="/flaky",
+            method="GET",
+        ),
+    )
+
+    with patch("httpx.AsyncClient.request", side_effect=httpx.ConnectError("refused")):
+        with pytest.raises(RuntimeError) as exc_info:
+            asyncio.run(execute_openapi(tool, {}))
+
+    assert "mynamespace" in str(exc_info.value)
+    assert "refresh" in str(exc_info.value)
+
+
+def test_preflight_missing_required_exits_code_1():
+    """dispatch_tool_command exits 1 before sending HTTP when required params are missing."""
+    from cliforge.cli.dynamic import dispatch_tool_command
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.createUser",
+        namespace="t",
+        name="createUser",
+        input_schema={
+            "type": "object",
+            "required": ["name", "email"],
+            "properties": {
+                "name": {"type": "string", "x-param-in": "body"},
+                "email": {"type": "string", "x-param-in": "body"},
+            },
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com/v1", path="/users", method="POST"
+        ),
+    )
+    import click
+    # Passing None as connector — if we reach execute() the test will blow up,
+    # confirming the pre-flight intercepted it first.
+    with pytest.raises(click.exceptions.Exit) as exc_info:
+        dispatch_tool_command(tool, None, [], "json")
+    assert exc_info.value.exit_code == 1
+
+
+def test_preflight_passes_when_no_required_params():
+    """dispatch_tool_command does not exit pre-flight when all params are optional."""
+    from cliforge.cli.dynamic import dispatch_tool_command
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.listUsers",
+        namespace="t",
+        name="listUsers",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "x-param-in": "query"},
+            },
+        },
+        execution=OpenApiExecution(
+            base_url="https://api.example.com/v1", path="/users", method="GET"
+        ),
+    )
+
+    class FakeConnector:
+        async def execute(self, tool_id: str, input_data: dict) -> dict:
+            return {"status_code": 200, "data": {"users": []}, "success": True}
+
+    import io, sys
+    buf = io.StringIO()
+    old_stdout, sys.stdout = sys.stdout, buf
+    try:
+        dispatch_tool_command(tool, FakeConnector(), [], "json")
+    finally:
+        sys.stdout = old_stdout
+    # If we got here without SystemExit, pre-flight passed correctly
+
+
+def test_format_execution_result_success_shows_only_data(capsys):
+    """Successful execution result shows just the data, not the status_code wrapper."""
+    from cliforge.cli.formatting import format_execution_result
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.op",
+        namespace="t",
+        name="op",
+        input_schema={"type": "object", "properties": {}},
+        execution=OpenApiExecution(base_url="https://api.example.com/v1", path="/x", method="GET"),
+    )
+    result = {"status_code": 200, "data": {"users": [], "total": 0}, "success": True}
+    format_execution_result(result, "json", tool)
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert "users" in data
+    assert "status_code" not in data
+
+
+def test_format_execution_result_error_shows_status_and_message():
+    """Non-success response is summarised: status + message, nothing dumped to stdout."""
+    from io import StringIO
+    from rich.console import Console
+    from cliforge.cli.formatting import format_execution_result
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="t.op",
+        namespace="t",
+        name="op",
+        input_schema={"type": "object", "properties": {}},
+        execution=OpenApiExecution(base_url="https://api.example.com/v1", path="/x", method="POST"),
+    )
+    result = {
+        "status_code": 400,
+        "data": {"message": "name is required", "code": 400},
+        "success": False,
+    }
+    err_buf = StringIO()
+    fake_err = Console(file=err_buf, highlight=False, markup=False)
+    with patch("cliforge.cli.formatting.err_console", fake_err):
+        import io, sys
+        out_buf = io.StringIO()
+        old_stdout, sys.stdout = sys.stdout, out_buf
+        try:
+            format_execution_result(result, "json", tool)
+        finally:
+            sys.stdout = old_stdout
+
+    err_text = err_buf.getvalue()
+    assert "400" in err_text
+    assert "name is required" in err_text
+    assert out_buf.getvalue().strip() == ""
+
+
 def test_root_help_shows_direct_execution_hint(tmp_path, example_spec_path):
     """Root help output explains direct namespace execution when connectors are registered."""
     registry_dir = tmp_path / ".cliforge"

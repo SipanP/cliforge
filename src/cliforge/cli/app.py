@@ -140,26 +140,8 @@ def _print_tool_help(namespace: str, tool_name: str) -> None:
 
     # Parameters table
     params = schema_to_cli_params(tool.input_schema)
-    if params:
-        table = Table(box=box.SIMPLE_HEAD, show_header=True, padding=(0, 1))
-        table.add_column("Flag", style="yellow", no_wrap=True)
-        table.add_column("Type", style="cyan")
-        table.add_column("Required", style="red")
-        table.add_column("Location", style="dim")
-        table.add_column("Description")
-
-        for p in params:
-            flag = f"--{p['name']}"
-            req = "yes" if p["required"] else ""
-            loc = p.get("location", "query")
-            desc = escape(p.get("description") or "")
-            if p.get("enum"):
-                desc += f"  [dim]({', '.join(str(e) for e in p['enum'])})[/dim]"
-            table.add_row(flag, p["type"], req, loc, desc)
-
-        console.print(Panel(table, title="[bold]Parameters[/bold]", border_style="dim"))
-    else:
-        console.print("  [dim]No parameters.[/dim]\n")
+    from cliforge.cli.formatting import print_param_table
+    print_param_table(params)
 
     # Usage example
     required_params = [p for p in params if p["required"]]
