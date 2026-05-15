@@ -133,3 +133,50 @@ def test_schema_output_deterministic(tmp_path, example_spec_path):
         result1 = runner.invoke(app, ["schema", "myapi", "listUsers"])
         result2 = runner.invoke(app, ["schema", "myapi", "listUsers"])
         assert result1.output == result2.output
+
+
+def test_add_openapi_persists_base_url_in_metadata(tmp_path, example_spec_path):
+    """add openapi always stores the resolved base_url in connector metadata."""
+    registry_dir = tmp_path / ".cliforge"
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+
+    import json
+    connectors = json.loads((registry_dir / "connectors.json").read_text())
+    assert "base_url" in connectors["myapi"]["metadata"]
+    assert connectors["myapi"]["metadata"]["base_url"].startswith("http")
+
+
+def test_executor_fails_fast_on_invalid_url():
+    """Executor raises immediately (no retries) when the URL has no http/https scheme."""
+    import pytest
+    import asyncio
+    from cliforge.connectors.openapi.executor import execute_openapi
+    from cliforge.models.tool import Tool, OpenApiExecution
+
+    tool = Tool(
+        id="test.bad",
+        namespace="test",
+        name="bad",
+        input_schema={"type": "object", "properties": {}},
+        execution=OpenApiExecution(
+            base_url="/api/v3",  # missing scheme — simulates stale cache
+            path="/pet",
+            method="GET",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="missing an http/https scheme"):
+        asyncio.run(execute_openapi(tool, {}))
+
+
+def test_root_help_shows_direct_execution_hint(tmp_path, example_spec_path):
+    """Root help output explains direct namespace execution when connectors are registered."""
+    registry_dir = tmp_path / ".cliforge"
+    with patch("cliforge.registry.persistence.DEFAULT_DIR", registry_dir):
+        runner.invoke(app, ["add", "openapi", "myapi", str(example_spec_path)])
+        result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    assert "directly" in result.output.lower() or "namespace" in result.output.lower()
+    assert "myapi" in result.output

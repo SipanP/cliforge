@@ -291,3 +291,27 @@ def test_detect_base_url_relative_server_local_source_warns(caplog):
     assert "relative" in caplog.text.lower()
     # Falls through to localhost since there's no origin to resolve against
     assert result == "http://localhost"
+
+
+@pytest.mark.asyncio
+async def test_connector_exposes_resolved_base_url(example_spec_path):
+    """connector.base_url is set to the resolved URL after discover()."""
+    connector = OpenApiConnector(
+        namespace="test",
+        source=str(example_spec_path),
+    )
+    await connector.discover()
+    assert connector.base_url is not None
+    assert connector.base_url.startswith("http")
+
+
+@pytest.mark.asyncio
+async def test_connector_base_url_override_respected(example_spec_path):
+    """Explicit base_url passed to the connector takes priority over auto-detection."""
+    connector = OpenApiConnector(
+        namespace="test",
+        source=str(example_spec_path),
+        base_url="https://custom.example.com/api",
+    )
+    await connector.discover()
+    assert connector.base_url == "https://custom.example.com/api"

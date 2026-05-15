@@ -45,7 +45,7 @@ def _root(ctx: typer.Context) -> None:
 
 
 def _print_namespace_panel() -> None:
-    """Print registered namespaces as dynamic commands below the standard help."""
+    """Print registered namespaces with clear direct-execution instructions."""
     from cliforge.registry.store import Registry
 
     registry = Registry()
@@ -59,27 +59,53 @@ def _print_namespace_panel() -> None:
         )
         return
 
+    # Build the namespace table.
     table = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
     table.add_column("namespace", style="bold cyan", no_wrap=True)
     table.add_column("type", style="dim")
     table.add_column("tools", style="green", justify="right")
 
+    first_ns: str | None = None
+    first_tool: str | None = None
     for cfg in connectors:
         tools = registry.get_tools(cfg.namespace)
         table.add_row(cfg.namespace, cfg.type, f"{len(tools)} tools")
+        if first_ns is None and tools:
+            first_ns = cfg.namespace
+            first_tool = tools[0].name
+
+    # Header: make the direct-execution pattern impossible to miss.
+    console.print()
+    console.print(
+        "[bold]Run tools directly[/bold] — no extra setup needed:\n"
+        f"  [bold]cliforge [cyan]<namespace>[/cyan] [green]<tool>[/green] [yellow][--flags][/yellow][/bold]"
+    )
+    if first_ns and first_tool:
+        console.print(
+            f"\n  [dim]Example:[/dim]  "
+            f"[bold]cliforge [cyan]{first_ns}[/cyan] [green]{first_tool}[/green] [yellow]--help[/yellow][/bold]"
+        )
+    console.print()
 
     panel = Panel(
         table,
-        title="[bold]Registered Namespaces[/bold]  [dim](dynamic commands)[/dim]",
-        subtitle="[dim]cliforge [cyan]<namespace>[/cyan] [green]<tool>[/green] [yellow][--flags][/yellow][/dim]",
+        title="[bold]Registered Namespaces[/bold]",
+        subtitle="[dim]Each namespace is a runnable command prefix[/dim]",
         border_style="blue",
         padding=(0, 1),
     )
-    console.print()
     console.print(panel)
     console.print(
-        "  [dim]List tools:[/dim]  [bold]cliforge tools[/bold]"
-        "   [dim]Tool help:[/dim]  [bold]cliforge [cyan]<namespace>[/cyan] [green]<tool>[/green] [yellow]--help[/yellow][/bold]\n"
+        f"  [dim]List tools in a namespace:[/dim]   "
+        f"[bold]cliforge [cyan]<namespace>[/cyan][/bold]\n"
+        f"  [dim]Show a tool's parameters:[/dim]    "
+        f"[bold]cliforge [cyan]<namespace>[/cyan] [green]<tool>[/green] [yellow]--help[/yellow][/bold]\n"
+        f"  [dim]Run a tool:[/dim]                  "
+        f"[bold]cliforge [cyan]<namespace>[/cyan] [green]<tool>[/green] [yellow][--flag value ...][/yellow][/bold]\n"
+        f"\n"
+        f"  [dim]Make a shorter command:[/dim]       "
+        f"[bold]cliforge forge [cyan]<namespace>[/cyan][/bold]"
+        f"  [dim](e.g. 'gh' instead of 'cliforge github')[/dim]\n"
     )
 
 

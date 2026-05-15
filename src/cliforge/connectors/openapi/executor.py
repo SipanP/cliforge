@@ -34,6 +34,14 @@ async def execute_openapi(
     )
 
     url = _build_url(execution.base_url, execution.path, path_params)
+
+    if not url.startswith(("http://", "https://")):
+        raise RuntimeError(
+            f"Invalid URL for '{tool.name}': '{url}' is missing an http/https scheme.\n"
+            f"  The connector's base URL may be stale. Fix it with:\n"
+            f"    cliforge refresh {tool.namespace}"
+        )
+
     method = execution.method.upper()
     headers: dict[str, str] = {"Accept": "application/json"}
     if auth_headers:

@@ -59,8 +59,9 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - Merges query params + path params + requestBody into one flat JSON Schema per tool
 - Each property carries `x-param-in` (`"query"`, `"path"`, `"body"`) so execution knows where to route it
 - Relative server URLs (e.g. `/api/v3`) resolved against the remote source origin — fixes real-world specs like Petstore
-- `--base-url` override stored in registry metadata
-- httpx-based async execution with 3-attempt retry on transport errors
+- Resolved `base_url` always stored in registry metadata at `add` time (not just when `--base-url` is passed); `connector.base_url` is a public attribute set during `discover()` so callers can read it back
+- `refresh` re-detects the base URL and updates registry metadata, fixing stale URLs without re-adding
+- httpx-based async execution with 3-attempt retry on transport errors; fast-fails immediately (no retries) when URL is missing an http/https scheme, with a `cliforge refresh <namespace>` hint
 
 ### MCP connector
 - stdio transport via the official MCP SDK
@@ -75,7 +76,7 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `forged.json` — tracks forged commands (command name → namespace + script path + install dir + created_at)
 - `config.json` — user preferences (currently: `forge.default_install_dir`)
 - Tools are cached on `add` and reloaded on every startup
-- `refresh` re-discovers and overwrites cached tools
+- `refresh` re-discovers, overwrites cached tools, and updates `base_url` in connector metadata
 
 ### Auth
 - Bearer token, API key, and env-var providers
@@ -99,11 +100,12 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `cliforge forge config [--default-install-dir]`
 
 **Dynamic dispatch** (the main UX path):
-- `cliforge <namespace>` — lists all tools in that namespace
+- `cliforge <namespace>` — lists all tools in that namespace with a prominent banner showing the direct execution pattern
 - `cliforge <namespace> --help` — same as above
 - `cliforge <namespace> <tool> --help` — renders parameter table + usage example
 - `cliforge <namespace> <tool> [--flags]` — executes the tool
 - `--output json|table|raw` stripped before execution, defaults to `json`
+- Root `cliforge` help (no args) shows a concrete direct-execution example using the first registered namespace and tool, making it immediately clear that `cliforge <namespace> <tool>` works without any extra setup
 
 **Forge (`forge_app` sub-group, consistent with `add_app`/`connectors_app` pattern):**
 - Primary shorthand: `cliforge forge <namespace> [command-name]` — routed to `create` by `main.py` before typer sees it
@@ -121,7 +123,7 @@ The entire system operates around one internal abstraction: `Tool`. All connecto
 - `raw` — compact single-line JSON
 
 ### Tests
-- 93 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), and end-to-end workflows
+- 100 passing tests across: OpenAPI loading/parsing/schema conversion/execution, MCP discovery/execution, runtime validation/dispatch, CLI commands, registry persistence, forge (shorthand routing, create/list/remove/config, error messages), and end-to-end workflows
 - Run with: `uv run pytest`
 
 ---
@@ -161,9 +163,25 @@ All user-supplied text (tool descriptions, parameter descriptions) that gets pas
 
 OpenAPI specs loaded from a remote URL may have `servers: [{url: /api/v3}]` — a relative path with no host. We resolve it against the origin of the source URL. Local files with relative server paths fall back to `http://localhost` and emit a warning to use `--base-url`.
 
+## `base_url` always persisted in connector metadata
+
+`ConnectorConfig.metadata["base_url"]` is always written at `add` time, regardless of whether `--base-url` was passed. The flow is:
+
+1. `add.py` calls `connector.discover()`, which sets `connector.base_url` to the resolved URL (auto-detected or explicit override).
+2. `add.py` reads back `connector.base_url` and stores it in `config.metadata["base_url"]`.
+3. When a tool is executed later, the connector is rebuilt from this config — `metadata["base_url"]` is passed as `base_url=` so the correct URL is used without re-loading the spec.
+
+`refresh` repeats the same flow: re-discovers, reads back `connector.base_url`, updates `config.metadata["base_url"]`, and re-persists the config. This means `cliforge refresh <namespace>` is the correct fix when a stale or missing base URL causes execution failures.
+
+`ConnectorConfig.metadata` is a freeform dict — new connector-specific options should go here rather than adding new fields to `ConnectorConfig`.
+
+## Executor fast-fails on invalid URL (no retries)
+
+Before the retry loop, `execute_openapi()` checks that the constructed URL starts with `http://` or `https://`. If not, it raises `RuntimeError` immediately with a message telling the user to run `cliforge refresh <namespace>`. This avoids 3× exponential-backoff retries that would never succeed for a structurally invalid URL (e.g. `/api/v3/pets` — a relative path with no host).
+
 ## Connector metadata stored at registration time
 
-`ConnectorConfig.metadata` is a freeform dict. Currently only `base_url` is stored there (when passed via `--base-url`). When executing tools from the registry, the connector is reconstructed from this config. New connector-specific options should go into `metadata` rather than adding new fields to `ConnectorConfig`.
+`ConnectorConfig.metadata` is a freeform dict. `base_url` is always stored there (see above). When executing tools from the registry, the connector is reconstructed from this config. New connector-specific options should go into `metadata` rather than adding new fields to `ConnectorConfig`.
 
 ## Forged commands are pure shell delegation
 
@@ -193,7 +211,9 @@ src/cliforge/
 ├── cli/
 │   ├── app.py                   Main typer app + all static top-level commands.
 │   │                            handle_dynamic_dispatch() lives here.
-│   │                            _print_tool_help(), _print_namespace_tools() here.
+│   │                            _print_tool_help(), _print_namespace_panel() here.
+│   │                            _print_namespace_panel() shows a prominent direct-execution
+│   │                            banner so users know `cliforge <ns> <tool>` works immediately.
 │   ├── dynamic.py               dispatch_tool_command(): parses raw --flags against
 │   │                            schema and calls connector.execute().
 │   ├── formatting.py            format_result(), output_json/table/raw, print_error/success.
@@ -211,8 +231,10 @@ src/cliforge/
 │   ├── openapi/
 │   │   ├── loader.py            load_spec(): YAML/JSON, local/remote
 │   │   ├── parser.py            parse_spec(): paths → Tool objects, $ref resolution
-│   │   ├── executor.py          execute_openapi(): httpx, retries, param routing
+│   │   ├── executor.py          execute_openapi(): httpx, retries, param routing.
+│   │   │                        Fast-fails with RuntimeError on missing http/https scheme.
 │   │   └── connector.py        OpenApiConnector. _detect_base_url() handles relative URLs.
+│   │                            connector.base_url is a public attribute set during discover().
 │   └── mcp/
 │       └── connector.py        McpConnector. stdio via official MCP SDK.
 │                                Must import stdio_client + ClientSession at module level
@@ -321,7 +343,7 @@ respx       httpx mock for tests
 
 ```bash
 uv sync --dev          # install all dependencies
-uv run pytest          # run all 93 tests
+uv run pytest          # run all 100 tests
 uv run pytest -v       # verbose
 uv run mypy src/       # type check
 uv run ruff check src/ # lint
@@ -346,3 +368,5 @@ uv tool install . --reinstall  # update after code changes
 6. **`forge` is a sub-app (`add_typer`), not a command (`app.command`)** — this is required for `forge list`, `forge remove`, `forge config` to work as subcommands. Reverting to `app.command("forge")(forge_fn)` would break the sub-group routing.
 
 7. **`_FORGE_SUBCOMMANDS` in `main.py` must stay in sync** with the actual subcommand names in `forge_app`. If a new forge subcommand is added (e.g. `forge rename`) without adding it to `_FORGE_SUBCOMMANDS`, then `cliforge forge rename <arg>` would be misrouted to `forge create rename` instead of `forge rename`.
+
+8. **`connector.base_url` must always be read back and stored in metadata after `discover()`**. If `add.py` or `connectors.py` skips this step, executed tools will have no base URL and will fail with a "missing http/https scheme" error at runtime. The only fix for users in that state would be re-adding the connector from scratch.
